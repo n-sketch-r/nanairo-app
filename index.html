@@ -532,7 +532,7 @@
                                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 mb-4 flex gap-2 items-start">
                                     <Icons.Info className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
                                     <p className="text-[10px] text-gray-500 leading-relaxed">
-                                        「準備完了」「受渡済」となったご注文はシステムからキャンセルできません。変更がある場合は公式LINEまたはお電話にてご連絡ください。
+                                        キャンセルは受取日（配送日）の前日23:59まで、「未対応」のご注文のみ可能です。それ以降の変更は公式LINEまたはお電話にてご連絡ください。
                                     </p>
                                 </div>
                                 
@@ -542,7 +542,7 @@
                                     ) : pastOrders.map(order => {
                                         const isCancelled = order.status === 'キャンセル';
                                         const isCompleted = order.status === '受渡済';
-                                        const isCancellable = order.status === '未対応';
+                                        const isCancellable = order.status === '未対応' && order.pickupDate > jstDateStr(0); // 前日23:59まで
                                         
                                         return (
                                             <div key={order.id} className={`border rounded-xl p-4 shadow-sm relative overflow-hidden ${isCancelled ? 'bg-gray-100 border-gray-200 opacity-70' : 'bg-white border-gray-200'}`}>

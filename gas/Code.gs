@@ -459,10 +459,11 @@ function fetchStockLogs() {
 }
 
 function calculateAnalytics(allOrders, startMonthStr, endMonthStr) {
+  // ★受取日（配送日）で期間に振り分ける（注文日だと月末の注文が請求明細書から漏れるため）
   const targetOrders = allOrders.filter(o => {
-    if (!o.orderDate || o.status === "キャンセル") return false;
-    const orderMonth = o.orderDate.substring(0, 7);
-    return orderMonth >= startMonthStr && orderMonth <= endMonthStr;
+    if (!o.pickupDate || o.status === "キャンセル") return false;
+    const pickupMonth = o.pickupDate.substring(0, 7);
+    return pickupMonth >= startMonthStr && pickupMonth <= endMonthStr;
   });
 
   let directSalesTotal = targetOrders.reduce((sum, o) => sum + (o.totalPrice || 0), 0);
@@ -810,6 +811,9 @@ function processCancelOrder(data) {
   if (!data.userId || String(row[7]) !== String(data.userId)) throw new Error("この注文はキャンセルできません。");
   const currentStatus = String(row[COL_ORD_STATUS] || "未対応");
   if (currentStatus !== "未対応") throw new Error("この注文はすでに処理が進んでいるためキャンセルできません。");
+  // ★キャンセルも注文と同じく前日23:59まで（当日はすでに準備を始めているため）
+  const rowPickup = row[2] instanceof Date ? Utilities.formatDate(row[2], "Asia/Tokyo", "yyyy-MM-dd") : String(row[2] || "").substring(0, 10).replace(/\//g, '-');
+  if (rowPickup && rowPickup <= todayJst()) throw new Error("受取日（配送日）の前日を過ぎたため、システムからはキャンセルできません。");
 
   SHEET_ORDERS.getRange(rowNum, COL_ORD_STATUS + 1).setValue("キャンセル");
 

@@ -329,8 +329,14 @@
                 setShowCustomerModal(null); 
             };
 
+            // ★受取日（配送日）が画面上部で選んだ期間に入っている注文か
+            const inViewPeriod = (o) => {
+                const m = String(o.pickupDate || '').slice(0, 7);
+                return m >= viewStartMonth && m <= viewEndMonth;
+            };
+
             const openBulkPrintPreview = (type) => {
-                const printableOrders = orders.filter(o => o.status !== 'キャンセル');
+                const printableOrders = orders.filter(o => o.status !== 'キャンセル' && inViewPeriod(o));
                 if(printableOrders.length === 0) return showMessage("指定期間に印刷可能な注文がありません。");
                 setPrintOrders(printableOrders); setPrintType(type);
             };
@@ -621,7 +627,7 @@
             const renderOrdersTab = () => {
                 const isCurrentMonth = viewStartMonth === todayMonth;
                 const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了') || [];
-                const pastOrders = orders.filter(o => o.status === '受渡済' || o.status === 'キャンセル') || [];
+                const pastOrders = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o));
 
                 return (
                     <div className="animate-slide-up space-y-5 relative z-10">
