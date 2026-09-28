@@ -103,6 +103,8 @@ const COL_PROD_NAME = 1;
 const COL_PROD_PRICE = 2;
 const COL_PROD_WEIGHT = 3;
 const COL_PROD_STOCK = 4;
+const COL_PROD_ACTIVE = 5;   // F: 販売中（TRUE/FALSE。空欄は販売中）
+const COL_PROD_DESC = 6;     // G: 一言説明（注文画面に表示）
 
 const COL_ORD_STATUS = 8;
 const COL_ORD_SENMU_CHECK = 9;
@@ -116,7 +118,9 @@ const COL_ORD_STORE = 15;    // P: 店舗名・会社名（飲食店のお客様
 // ★注文IDと集金済（Q〜R）
 const COL_ORD_ID = 16;       // Q: 注文ID（行を消してもずれない固有の番号）
 const COL_ORD_PAID = 17;     // R: 集金済
-const ORD_COLS = 18;
+const COL_ORD_ITEM_IDS = 18; // S: 商品ID内訳（"1:2,3:1"。商品名を変えても在庫がずれないように）
+const COL_ORD_STAFF_MEMO = 19; // T: スタッフメモ（お客様には見えない）
+const ORD_COLS = 20;
 
 const ORDER_STATUSES = ["未対応", "準備完了", "受渡済", "キャンセル"];
 
@@ -137,6 +141,39 @@ function setupOrderColumns() {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ★初回だけエディタから実行：商品の管理・メモ・設定の列とシートを作る
+function setupV5() {
+  // 商品：販売中・一言説明
+  SHEET_PRODUCTS.getRange(1, COL_PROD_ACTIVE + 1, 1, 2).setValues([["販売中", "説明"]]);
+  const DESC = { "アマランサス": "鮮やかな赤紫・やさしい味", "デトロイト": "赤い茎がサラダを華やかに", "にんじん": "ほのかなにんじんの香り", "ハーブミックス": "いろいろな風味を少しずつ", "ひまわり": "シャキッと食感・ナッツの風味", "ペッパークレス": "ピリッとした辛み", "マスタード": "ツンとくる辛み・肉料理に", "レッドケール": "クセが少なく彩りに", "レッドラディッシュ": "大根の辛み・彩りに", "ロケット": "ごまの香り・ピリッと辛い", "青じそ": "爽やかな香り" };
+  const HIDDEN = ["なないろ菜", "レッドソレル"];
+  const last = SHEET_PRODUCTS.getLastRow();
+  if (last >= 2) {
+    const rng = SHEET_PRODUCTS.getRange(2, 1, last - 1, COL_PROD_DESC + 1);
+    const v = rng.getValues();
+    v.forEach(r => {
+      const name = String(r[COL_PROD_NAME]);
+      if (r[COL_PROD_ACTIVE] === "" || r[COL_PROD_ACTIVE] === null) r[COL_PROD_ACTIVE] = HIDDEN.indexOf(name) === -1;
+      if (!r[COL_PROD_DESC] && DESC[name]) r[COL_PROD_DESC] = DESC[name];
+    });
+    rng.setValues(v);
+  }
+  // 注文：商品ID内訳・スタッフメモ
+  SHEET_ORDERS.getRange(1, COL_ORD_ITEM_IDS + 1, 1, 2).setValues([["商品ID内訳", "スタッフメモ"]]);
+  // お客様：メモ ／ 委託先：連絡先
+  customerSheet().getRange(1, 7).setValue("メモ");
+  SHEET_AGENCIES.getRange(1, 4).setValue("連絡先");
+  // 設定：今の配送ルールで初期化（すでにあれば触らない）
+  const sh = settingsSheet();
+  if (sh.getLastRow() < 2) {
+    const rows = Object.keys(DEFAULT_SETTINGS).map(k => [k, JSON.stringify(DEFAULT_SETTINGS[k])]);
+    sh.getRange(2, 1, rows.length, 2).setValues(rows);
+  }
+  clearProductsCache();
+  CacheService.getScriptCache().remove("settings_cache");
+  Logger.log("v5 の準備が完了しました（販売中・説明・商品ID内訳・スタッフメモ・お客様メモ・委託先の連絡先・設定）");
 }
 
 function newOrderId() {
@@ -166,12 +203,70 @@ const DELIVERY = {
 const METHOD_DELIVERY = "配送";
 const METHOD_PICKUP = "店頭受取";
 
+/* ===== ★設定（管理画面の「設定」から変更。Settings シートに保存） ===== */
+const DEFAULT_SETTINGS = {
+  deliveryDays: DELIVERY.days,
+  deliveryTime: DELIVERY.time,
+  deliveryFee: DELIVERY.fee,
+  freeThreshold: DELIVERY.freeThreshold,
+  pickupTimes: ["11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00"],
+  closedDays: []
+};
+
+function settingsSheet() {
+  let sh = SS.getSheetByName("Settings");
+  if (!sh) {
+    sh = SS.insertSheet("Settings");
+    sh.getRange(1, 1, 1, 2).setValues([["項目", "値（JSON）"]]);
+  }
+  return sh;
+}
+
+function getSettings() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get("settings_cache");
+  if (hit) return JSON.parse(hit);
+  const out = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  const values = settingsSheet().getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    const k = String(values[i][0] || "");
+    if (!(k in out)) continue;
+    try { out[k] = JSON.parse(String(values[i][1])); } catch (e) {}
+  }
+  out.closedDays = (out.closedDays || []).filter(d => d >= todayJst()); // 過ぎた休業日は除く
+  cache.put("settings_cache", JSON.stringify(out), 21600);
+  return out;
+}
+
+function saveSettings(data) {
+  const v = data.settings || {};
+  const days = (v.deliveryDays || []).map(Number).filter(d => d >= 0 && d <= 6);
+  const timeOk = t => /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(String(t));
+  if (!timeOk(v.deliveryTime)) throw new Error("配送の時間は「16:00-17:00」の形で入力してください。");
+  const pickupTimes = (v.pickupTimes || []).map(String).filter(timeOk);
+  if (pickupTimes.length === 0) throw new Error("店頭受け取りの時間帯を1つ以上選んでください。");
+  const fee = Number(v.deliveryFee), free = Number(v.freeThreshold);
+  if (!(fee >= 0) || !(free >= 0)) throw new Error("送料と無料になる金額は0以上の数字で入力してください。");
+  const closedDays = (v.closedDays || []).map(String).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  const next = { deliveryDays: days, deliveryTime: String(v.deliveryTime), deliveryFee: Math.round(fee), freeThreshold: Math.round(free), pickupTimes: pickupTimes, closedDays: closedDays };
+  const sh = settingsSheet();
+  const rows = Object.keys(next).map(k => [k, JSON.stringify(next[k])]);
+  sh.getRange(2, 1, Math.max(sh.getLastRow(), rows.length + 1), 2).clearContent();
+  sh.getRange(2, 1, rows.length, 2).setValues(rows);
+  CacheService.getScriptCache().remove("settings_cache");
+  return getSettings();
+}
+
 function doGet(e) {
   // ★公開してよいのは商品一覧だけ。管理データ・注文履歴は doPost（認証あり）で返す
   try {
     const action = e && e.parameter ? e.parameter.action : "";
     if (action === "getAdminData" || action === "getUserOrders") {
       return jsonOut({ status: "error", message: "AUTH_REQUIRED" });
+    }
+    if (action === "getSettings") {
+      const st = getSettings();
+      return jsonOut({ status: "success", settings: Object.assign({}, st, { areas: DELIVERY.areas }) });
     }
     return jsonOut(fetchProducts());
   } catch (err) {
@@ -184,6 +279,7 @@ function onEdit(e) {
   try {
     const name = e && e.range ? e.range.getSheet().getName() : "";
     if (name === "Products" || name === "Agencies" || name === "AgencyPrices") clearProductsCache();
+    if (name === "Settings") CacheService.getScriptCache().remove("settings_cache");
   } catch (err) {}
 }
 
@@ -200,7 +296,10 @@ function buildAdminData(data) {
     agencies: fetchAgencies(),
     agencyPrices: fetchAgencyPrices(),
     agencyDeliveries: fetchAgencyDeliveries(targetMonth, endMonth),
-    insights: buildInsights(allOrders, targetMonth, endMonth)
+    agencyDeliveriesAll: fetchAgencyDeliveries(),
+    insights: buildInsights(allOrders, targetMonth, endMonth),
+    customers: fetchCustomerRecords(),
+    settings: getSettings()
   };
 }
 
@@ -242,7 +341,8 @@ function doPost(e) {
 
   const action = data.action || "order";
   const ADMIN_ACTIONS = ["getAdminData", "stockUpdate", "bulkLoss", "cancelStockLog", "statusUpdate", "toggleCheck",
-    "agencyDelivery", "agencyInventory", "cancelAgencyDelivery", "cancelAgencyInventory", "checkAdmin"];
+    "agencyDelivery", "agencyInventory", "cancelAgencyDelivery", "cancelAgencyInventory", "checkAdmin",
+    "saveProduct", "saveAgency", "saveMemo", "saveSettings"];
   const CUSTOMER_ACTIONS = ["order", "cancelOrder", "getUserOrders", "getProfile", "saveProfile"];
 
   // --- 認証 ---
@@ -304,6 +404,10 @@ function doPost(e) {
     else if (action === "agencyInventory") processAgencyInventory(data);
     else if (action === "cancelAgencyDelivery") processCancelAgencyDelivery(data);
     else if (action === "cancelAgencyInventory") processCancelAgencyInventory(data);
+    else if (action === "saveProduct") response.product = saveProduct(data);
+    else if (action === "saveAgency") response.agency = saveAgency(data);
+    else if (action === "saveMemo") saveMemo(data);
+    else if (action === "saveSettings") response.settings = saveSettings(data);
     else throw new Error("不明なアクションが指定されました: " + action);
   } catch (err) {
     response = { status: "error", message: err.toString() };
@@ -335,11 +439,49 @@ function fetchProducts() {
     name: String(row[COL_PROD_NAME] || ""),
     price: Number(row[COL_PROD_PRICE] || 0),
     weight: String(row[COL_PROD_WEIGHT] || "") + "g",
-    stock: Number(row[COL_PROD_STOCK] || 0)
-  }));
+    stock: Number(row[COL_PROD_STOCK] || 0),
+    active: isActiveCell(row[COL_PROD_ACTIVE]),
+    desc: String(row[COL_PROD_DESC] || "")
+  })).filter(p => p.id && p.name);
 
   cache.put("products_cache", JSON.stringify(products), 21600);
   return products;
+}
+
+// 販売中かどうか（空欄は販売中）
+function isActiveCell(v) {
+  if (v === "" || v === null || v === undefined) return true;
+  return v === true || String(v).toUpperCase() === "TRUE";
+}
+
+// ★商品の追加・編集（管理画面の「商品の管理」）
+function saveProduct(data) {
+  const name = String(data.name || "").trim().slice(0, 30);
+  const price = Number(data.price);
+  const weight = String(data.weight || "").replace(/g$/i, "").trim();
+  if (!name) throw new Error("商品名を入力してください。");
+  if (!Number.isInteger(price) || price < 0) throw new Error("価格は0以上の整数で入力してください。");
+  const values = SHEET_PRODUCTS.getDataRange().getValues();
+  let rowNum = -1, maxId = 0;
+  for (let i = 1; i < values.length; i++) {
+    const id = String(values[i][COL_PROD_ID]);
+    maxId = Math.max(maxId, Number(id) || 0);
+    if (data.id && id === String(data.id)) rowNum = i + 1;
+    else if (String(values[i][COL_PROD_NAME]) === name) throw new Error("同じ名前の商品がすでにあります。");
+  }
+  const active = data.active === false ? false : true;
+  const desc = String(data.desc || "").trim().slice(0, 40);
+  let id = String(data.id || "");
+  if (rowNum > 0) {
+    SHEET_PRODUCTS.getRange(rowNum, COL_PROD_NAME + 1, 1, 3).setValues([[name, price, weight]]);
+    SHEET_PRODUCTS.getRange(rowNum, COL_PROD_ACTIVE + 1, 1, 2).setValues([[active, desc]]);
+  } else {
+    id = String(maxId + 1);
+    const row = [id, name, price, weight, 0, active, desc];
+    SHEET_PRODUCTS.appendRow(row);
+  }
+  clearProductsCache();
+  return { id: id, name: name };
 }
 
 function fetchAgencies() {
@@ -353,10 +495,41 @@ function fetchAgencies() {
   const agencies = values.map(row => ({
     id: String(row[0] || ""),
     name: String(row[1] || ""),
-    feeRate: Number(row[2] || 0)
-  }));
+    feeRate: Number(row[2] || 0),
+    contact: String(row[3] || "")
+  })).filter(a => a.id);
   cache.put("agencies_cache", JSON.stringify(agencies), 21600);
   return agencies;
+}
+
+// ★委託先の追加・編集（手数料・連絡先・店頭価格）
+function saveAgency(data) {
+  const name = String(data.name || "").trim().slice(0, 40);
+  const feeRate = Number(data.feeRate);
+  if (!name) throw new Error("店舗名を入力してください。");
+  if (!(feeRate >= 0 && feeRate < 1)) throw new Error("手数料は0〜99%で入力してください。");
+  const contact = String(data.contact || "").trim().slice(0, 80);
+  const values = SHEET_AGENCIES.getDataRange().getValues();
+  let id = String(data.id || ""), rowNum = -1;
+  for (let i = 1; i < values.length; i++) if (id && String(values[i][0]) === id) rowNum = i + 1;
+  if (rowNum > 0) SHEET_AGENCIES.getRange(rowNum, 2, 1, 3).setValues([[name, feeRate, contact]]);
+  else { id = "AG" + Date.now().toString(36); SHEET_AGENCIES.appendRow([id, name, feeRate, contact]); }
+
+  // 店頭価格（委託先 × 商品）を追加・更新
+  const prices = Array.isArray(data.prices) ? data.prices : [];
+  if (prices.length) {
+    const pv = SHEET_AGENCY_PRICES.getDataRange().getValues();
+    prices.forEach(pr => {
+      const pid = String(pr.productId || ""), price = Number(pr.storePrice);
+      if (!pid || !(price >= 0)) return;
+      let found = -1;
+      for (let i = 1; i < pv.length; i++) if (String(pv[i][0]) === id && String(pv[i][1]) === pid) found = i + 1;
+      if (found > 0) SHEET_AGENCY_PRICES.getRange(found, 3).setValue(Math.round(price));
+      else { SHEET_AGENCY_PRICES.appendRow([id, pid, Math.round(price)]); pv.push([id, pid, price]); }
+    });
+  }
+  clearProductsCache();
+  return { id: id, name: name };
 }
 
 function fetchAgencyPrices() {
@@ -438,7 +611,8 @@ function fetchOrders() {
       address: String(row[COL_ORD_ADDRESS] || ""),
       phone: String(row[COL_ORD_PHONE] || ""),
       shippingFee: Number(row[COL_ORD_SHIPPING] || 0),
-      storeName: String(row[COL_ORD_STORE] || "")
+      storeName: String(row[COL_ORD_STORE] || ""),
+      staffMemo: String(row[COL_ORD_STAFF_MEMO] || "")
     };
   }).reverse();
 }
@@ -696,7 +870,8 @@ function processCancelAgencyInventory(data) {
 // ★配送料の計算（商品合計が基準額以上なら無料）
 function calcShippingFee(method, subtotal) {
   if (method !== METHOD_DELIVERY) return 0;
-  return subtotal >= DELIVERY.freeThreshold ? 0 : DELIVERY.fee;
+  const ST = getSettings();
+  return subtotal >= ST.freeThreshold ? 0 : ST.deliveryFee;
 }
 
 // 日本時間の「今日」を yyyy-MM-dd で返す
@@ -717,25 +892,30 @@ function processNewOrder(data) {
   // --- 1. 日付チェック（明日以降のみ） ---
   if (!/^\d{4}-\d{2}-\d{2}$/.test(pickupDate)) throw new Error("日付が正しくありません。");
   if (pickupDate <= todayJst()) throw new Error("当日のご注文はお電話にてご相談ください。明日以降の日付をお選びください。");
+  const ST = getSettings();
+  if (ST.closedDays.indexOf(pickupDate) > -1) throw new Error("申し訳ありません。その日はお休みをいただいています。別の日をお選びください。");
 
   // --- 2. 配送の場合のチェック ---
   let address = "", phone = "", pickupTime = String(data.pickupTime || "");
   if (method === METHOD_DELIVERY) {
-    if (DELIVERY.days.indexOf(weekdayOf(pickupDate)) === -1) throw new Error("配送は月曜日・火曜日のみ承っております。");
+    if (ST.deliveryDays.indexOf(weekdayOf(pickupDate)) === -1) throw new Error("配送は" + ST.deliveryDays.map(d => ["日", "月", "火", "水", "木", "金", "土"][d]).join("・") + "曜日のみ承っております。");
     const city = String(data.city || "");
     if (DELIVERY.areas.indexOf(city) === -1) throw new Error("配送エリア（庄内一円）外のため承れません。");
     address = city + String(data.addressDetail || "").trim();
     phone = normalizePhone(data.phone);
     if (!String(data.addressDetail || "").trim()) throw new Error("配送先のご住所を入力してください。");
     if (phone.replace(/-/g, "").length < 10) throw new Error("電話番号を正しく入力してください。");
-    pickupTime = DELIVERY.time;
+    pickupTime = ST.deliveryTime;
+  } else if (ST.pickupTimes.indexOf(pickupTime) === -1) {
+    throw new Error("受け取りの時間帯が正しくありません。画面を開き直してください。");
   }
 
   // --- 3. 金額と在庫はサーバー側で計算（画面から送られた金額は使わない） ---
   const prodValues = SHEET_PRODUCTS.getDataRange().getValues();
   const prodByName = {};
   for (let i = 1; i < prodValues.length; i++) {
-    prodByName[String(prodValues[i][COL_PROD_NAME])] = { price: Number(prodValues[i][COL_PROD_PRICE] || 0), stock: Number(prodValues[i][COL_PROD_STOCK] || 0) };
+    if (!isActiveCell(prodValues[i][COL_PROD_ACTIVE])) continue; // 販売を止めている商品は注文できない
+    prodByName[String(prodValues[i][COL_PROD_NAME])] = { id: String(prodValues[i][COL_PROD_ID]), price: Number(prodValues[i][COL_PROD_PRICE] || 0), stock: Number(prodValues[i][COL_PROD_STOCK] || 0) };
   }
 
   const items = String(data.orderItems || "").split("\n").map(s => {
@@ -748,7 +928,8 @@ function processNewOrder(data) {
   const shortages = [];
   items.forEach(it => {
     const prod = prodByName[it.name];
-    if (!prod) throw new Error("商品が見つかりません: " + it.name);
+    if (!prod) throw new Error("商品が見つかりません（販売を終了した可能性があります）: " + it.name);
+    it.id = prod.id;
     if (prod.stock < it.qty) shortages.push(`${it.name}（残り${Math.max(0, prod.stock)}P）`);
     subtotal += prod.price * it.qty;
   });
@@ -786,10 +967,12 @@ function processNewOrder(data) {
     shippingFee,
     storeName,
     orderId,
+    "",
+    items.map(it => `${it.id}:${it.qty}`).join(","),
     ""
   ]);
 
-  items.forEach(it => updateStockByName(it.name, -it.qty));
+  items.forEach(it => updateStockById(it.id, -it.qty));
   clearProductsCache();
 
   const order = {
@@ -824,7 +1007,7 @@ function weekdayLabel(dateStr) {
 }
 
 /* ===== ★お客様の登録情報（初回だけ入力：フルネーム・電話番号・店舗名） ===== */
-// Customers シート：A LINEユーザーID / B お名前 / C 電話番号 / D 店舗名 / E 登録日時 / F 更新日時
+// Customers シート：A LINEユーザーID / B お名前 / C 電話番号 / D 店舗名 / E 登録日時 / F 更新日時 / G メモ（スタッフ用）
 function customerSheet() {
   let sh = SS.getSheetByName("Customers");
   if (!sh) {
@@ -833,6 +1016,41 @@ function customerSheet() {
     sh.getRange("C:C").setNumberFormat("@"); // 電話番号の先頭の0を消さない
   }
   return sh;
+}
+
+// 管理画面用：登録情報とメモの一覧
+function fetchCustomerRecords() {
+  const values = customerSheet().getDataRange().getValues();
+  const out = [];
+  for (let i = 1; i < values.length; i++) {
+    if (!values[i][0]) continue;
+    out.push({ key: String(values[i][0]), fullName: String(values[i][1] || ""), phone: String(values[i][2] || ""), storeName: String(values[i][3] || ""), memo: String(values[i][6] || "") });
+  }
+  return out;
+}
+
+// ★スタッフメモ（注文ごと・お客様ごと）
+function saveMemo(data) {
+  const memo = String(data.memo || "").slice(0, 500);
+  if (data.kind === "order") {
+    const values = SHEET_ORDERS.getDataRange().getValues();
+    const rowNum = findOrderRow(values, data.orderId);
+    if (rowNum < 0) throw new Error("注文が見つかりません。画面を更新してください。");
+    SHEET_ORDERS.getRange(rowNum, COL_ORD_STAFF_MEMO + 1).setValue(memo);
+    return;
+  }
+  if (data.kind === "customer") {
+    const key = String(data.key || "");
+    if (!key) throw new Error("お客様が見つかりません。");
+    const sh = customerSheet();
+    const values = sh.getDataRange().getValues();
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][0]) === key) { sh.getRange(i + 1, 7).setValue(memo); return; }
+    }
+    sh.appendRow([key, "", "", "", new Date(), new Date(), memo]); // LINE以外のお客様はメモだけの行を作る
+    return;
+  }
+  throw new Error("メモの種類が正しくありません。");
 }
 
 function findCustomer(userId) {
@@ -936,7 +1154,9 @@ function processCancelOrder(data) {
     return p.length === 2 ? { name: p[0].trim(), qty: parseInt(p[1], 10) } : null;
   }).filter(Boolean);
 
-  itemsList.forEach(item => { updateStockByName(item.name, item.qty); });
+  const idPairs = String(row[COL_ORD_ITEM_IDS] || "").split(",").map(x => x.split(":")).filter(x => x.length === 2 && x[0]);
+  if (idPairs.length) idPairs.forEach(([pid, q]) => updateStockById(pid, parseInt(q, 10) || 0));
+  else itemsList.forEach(item => { updateStockByName(item.name, item.qty); });
   clearProductsCache();
 
   const userName = String(row[0] || "");

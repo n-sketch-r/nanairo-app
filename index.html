@@ -93,7 +93,7 @@
         };
 
         // ★画面に出さない商品（スプレッドシートには残したまま、販売だけ止める）
-        //   admin.html の HIDDEN_PRODUCTS も同じにしてください
+        //   ※今は管理画面の「商品の管理」で切り替え。これは古いGASのときだけ使う予備
         const HIDDEN_PRODUCTS = ["なないろ菜", "レッドソレル"];
 
         // ★商品の一言説明（商品一覧に表示）
@@ -118,7 +118,19 @@
             freeThreshold: 1000,         // この金額以上で送料無料（商品合計・税込）
             fee: 500,                    // 送料（税込）
             areas: ["鶴岡市", "酒田市", "三川町", "庄内町", "遊佐町"],
-            weeksAhead: 4                // 何週先まで選べるか
+            weeksAhead: 4,               // 何週先まで選べるか
+            pickupTimes: ["11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00"], // 店頭受け取りの時間帯
+            closedDays: []               // 休業日（受け取り・配送を止める日）
+        };
+        // ★管理画面の「設定」の値で上書きする
+        const applySettings = (st) => {
+            if (!st) return;
+            if (Array.isArray(st.deliveryDays)) DELIVERY.days = st.deliveryDays;
+            if (st.deliveryTime) DELIVERY.time = st.deliveryTime;
+            if (st.deliveryFee != null) DELIVERY.fee = Number(st.deliveryFee);
+            if (st.freeThreshold != null) DELIVERY.freeThreshold = Number(st.freeThreshold);
+            if (Array.isArray(st.pickupTimes) && st.pickupTimes.length) DELIVERY.pickupTimes = st.pickupTimes;
+            if (Array.isArray(st.closedDays)) DELIVERY.closedDays = st.closedDays;
         };
         const METHOD_PICKUP = "店頭受取";
         const METHOD_DELIVERY = "配送";
@@ -151,13 +163,13 @@
             const list = [];
             for (let i = 1; i <= DELIVERY.weeksAhead * 7; i++) {
                 const ds = jstDateStr(i);
-                if (DELIVERY.days.includes(weekdayOf(ds))) list.push(ds);
+                if (DELIVERY.days.includes(weekdayOf(ds)) && !DELIVERY.closedDays.includes(ds)) list.push(ds);
             }
             return list;
         };
 
         // 店頭受取で選べる日（明日から14日分）
-        const getPickupDates = () => Array.from({ length: 14 }, (_, i) => jstDateStr(i + 1));
+        const getPickupDates = () => Array.from({ length: 14 }, (_, i) => jstDateStr(i + 1)).filter(ds => !DELIVERY.closedDays.includes(ds));
 
         function App() {
             const [userName, setUserName] = useState("読み込み中...");
@@ -185,7 +197,8 @@
 
             // ★配送対応
             const [deliveryMethod, setDeliveryMethod] = useState(METHOD_PICKUP);
-            const deliveryDates = useMemo(() => getDeliveryDates(), []);
+            const [settingsVer, setSettingsVer] = useState(0); // 設定を読み込んだら日付の候補を作り直す
+            const deliveryDates = useMemo(() => getDeliveryDates(), [settingsVer]);
             const [deliveryDate, setDeliveryDate] = useState("");
             const [city, setCity] = useState(DELIVERY.areas[0]);
             const [addressDetail, setAddressDetail] = useState("");
@@ -193,7 +206,7 @@
             const [storeName, setStoreName] = useState(""); // ★飲食店などの店舗名（任意）
             const [errorMsg, setErrorMsg] = useState("");
             const [lastOrder, setLastOrder] = useState(null);
-            const pickupDates = useMemo(() => getPickupDates(), []);
+            const pickupDates = useMemo(() => getPickupDates(), [settingsVer]);
             const [detailProduct, setDetailProduct] = useState(null); // 商品の詳しい画面
             const [loadError, setLoadError] = useState(false);        // 商品一覧が読み込めなかった
             const [bumpKey, setBumpKey] = useState(0);                // カートのボタンを弾ませる合図
@@ -259,7 +272,19 @@
                     });
 
                 loadProducts();
+                fetch(`${GAS_URL}?action=getSettings&t=${Date.now()}`)
+                    .then(res => res.json())
+                    .then(data => { if (data && data.status === 'success') { applySettings(data.settings); setSettingsVer(v => v + 1); } })
+                    .catch(err => console.error("設定の取得エラー", err));
             }, []);
+
+            // 設定が変わって、選んでいた日・時間が選べなくなったら選び直す
+            useEffect(() => {
+                if (!settingsVer) return;
+                setPickupDate(prev => pickupDates.includes(prev) ? prev : (pickupDates[0] || ''));
+                setPickupTime(prev => DELIVERY.pickupTimes.includes(prev) ? prev : DELIVERY.pickupTimes[0]);
+                setDeliveryDate(prev => deliveryDates.includes(prev) ? prev : '');
+            }, [settingsVer]);
 
             const loadProducts = () => {
                 setLoadError(false);
@@ -268,9 +293,10 @@
                     .then(data => {
                         if (Array.isArray(data)) {
                             const formattedData = data
-                                .filter(p => !HIDDEN_PRODUCTS.includes(p.name)) // ★販売停止中の商品は出さない
+                                .filter(p => p.active === undefined ? !HIDDEN_PRODUCTS.includes(p.name) : p.active !== false) // ★販売停止中の商品は出さない
                                 .map(p => ({
                                     ...p,
+                                    desc: p.desc || PRODUCT_DESC[p.name] || '',
                                     unit: 'P',
                                     image: IMAGE_MAP[p.name] || null // 写真がない商品は商品名を表示
                                 }));
@@ -596,7 +622,7 @@
                                                         </div>
                                                         <div className={`p-2.5 flex-1 flex flex-col ${isSoldOut ? 'opacity-60' : ''}`}>
                                                             <h4 onClick={() => setDetailProduct(product)} className="text-[14px] font-bold text-stone-800 leading-tight line-clamp-2 cursor-pointer">{product.name}</h4>
-                                                            {PRODUCT_DESC[product.name] && <p className="text-xs text-stone-500 mt-0.5 leading-snug">{PRODUCT_DESC[product.name]}</p>}
+                                                            {product.desc && <p className="text-xs text-stone-500 mt-0.5 leading-snug">{product.desc}</p>}
                                                             <div className="flex justify-between items-end mt-auto pt-1.5">
                                                                 <span className="font-black text-stone-900">¥{product.price}</span>
                                                                 {isSoldOut ? <span className="text-xs text-stone-500">売り切れ</span>
@@ -880,7 +906,7 @@
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 mb-1">ご来店時間帯 <span className="text-red-500">*</span></label>
                                             <select value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="block w-full border border-gray-300 rounded-lg p-3 text-base bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none appearance-none box-border">
-                                                <option value="11:00-12:00">11:00 - 12:00</option><option value="12:00-13:00">12:00 - 13:00</option><option value="13:00-14:00">13:00 - 14:00</option><option value="14:00-15:00">14:00 - 15:00</option><option value="15:00-16:00">15:00 - 16:00</option><option value="16:00-17:00">16:00 - 17:00</option>
+                                                {DELIVERY.pickupTimes.map(t => <option key={t} value={t}>{t.replace('-', ' - ')}</option>)}
                                             </select>
                                         </div>
                                         </>
@@ -958,7 +984,7 @@
                                     </div>
                                     <div className="px-5 pt-4">
                                         <h3 className="text-xl font-black text-stone-800">{p.name}</h3>
-                                        {PRODUCT_DESC[p.name] && <p className="text-sm text-stone-600 mt-1">{PRODUCT_DESC[p.name]}</p>}
+                                        {p.desc && <p className="text-sm text-stone-600 mt-1">{p.desc}</p>}
                                         <div className="flex items-end justify-between mt-3">
                                             <span className="text-2xl font-black text-stone-900">¥{p.price}<span className="text-sm font-normal text-stone-500 ml-1">（税込）</span></span>
                                             <span className="text-sm text-stone-500">内容量 {p.weight}{p.stock > 0 && p.stock <= 5 ? `・残りわずか ${p.stock}` : ''}</span>

@@ -170,6 +170,17 @@
             const [anFilter, setAnFilter] = useState('all');
             const [anShowAll, setAnShowAll] = useState(false);
             const [anChartMode, setAnChartMode] = useState('amount');
+            const [allProducts, setAllProducts] = useState([]);           // 販売停止中も含めた商品（商品の管理用）
+            const [agencyDeliveriesAll, setAgencyDeliveriesAll] = useState([]); // 委託：全期間の納品（履歴・推移用）
+            const [customerRecords, setCustomerRecords] = useState([]);   // Customers シート（登録情報・メモ）
+            const [serverSettings, setServerSettings] = useState(null);   // 設定（配送・休業日など）
+            const [settingsDraft, setSettingsDraft] = useState(null);
+            const [agencyViewId, setAgencyViewId] = useState(null);
+            const [showDeliveryForm, setShowDeliveryForm] = useState(false);
+            const [agencyEdit, setAgencyEdit] = useState(null);
+            const [productEdit, setProductEdit] = useState(null);
+            const [isSavingAdmin, setIsSavingAdmin] = useState(false);
+            const [memoDrafts, setMemoDrafts] = useState({});
             
             // モーダル・キャンセル関連
             const [showBulkLossModal, setShowBulkLossModal] = useState(false);
@@ -265,7 +276,13 @@
                     if (data.message === 'AUTH_REQUIRED') return logout('パスワードが変更されたか、正しくありません。もう一度入力してください。');
                     if (data.status === 'error') return showMessage("データの取得に失敗しました。");
                     
-                    if (data.products) setProducts(data.products.filter(p => !HIDDEN_PRODUCTS.includes(p.name)));
+                    if (data.products) {
+                        setAllProducts(data.products);
+                        setProducts(data.products.filter(p => p.active === undefined ? !HIDDEN_PRODUCTS.includes(p.name) : p.active !== false));
+                    }
+                    setAgencyDeliveriesAll(data.agencyDeliveriesAll || []);
+                    setCustomerRecords(data.customers || []);
+                    setServerSettings(data.settings || null);
                     if (data.orders) setOrders(data.orders);
                     if (data.analytics) setAnalytics(data.analytics);
                     setInsights(data.insights || null);
@@ -572,30 +589,30 @@
                             </div>
                             <div className="p-4 sm:p-8 mt-4 overflow-x-auto flex-1">
                                 {printOrders.map((order) => {
-                                    let totalBillingExTax = 0; order.itemsList.forEach(i => totalBillingExTax += (Number(i.billingExTax || 0) * Number(i.qty || 0)));
+                                    let totalBillingExTax = 0; order.itemsList.forEach(i => totalBillingExTax += (i.lineExTax != null ? Number(i.lineExTax) : Number(i.billingExTax || 0) * Number(i.qty || 0)));
                                     const totalTaxAmount = Math.floor(totalBillingExTax * 0.08); const totalBillingTaxIn = totalBillingExTax + totalTaxAmount;
                                     return (
                                         <div key={order.id} className="page-break bg-white p-8 sm:p-12 shadow-sm rounded-lg border border-gray-200 mb-8 w-[800px] min-w-[800px] max-w-[800px] mx-auto text-gray-800 relative min-h-[250mm] pt-12 print:w-full print:min-w-0 print:max-w-none">
                                             <div className="flex justify-between items-start mb-8 border-b-2 border-gray-800 pb-4">
                                                 <div><h1 className="text-2xl font-bold border-b border-gray-400 inline-block pb-1 min-w-[200px]">{order.userName} <span className="text-lg">御中</span></h1></div>
                                                 <div className="text-right">
-                                                    <h2 className="text-3xl font-bold tracking-widest text-gray-800 mb-2">納 品 書</h2>
+                                                    <h2 className="text-3xl font-bold tracking-widest text-gray-800 mb-2">{order.docTitle || '納 品 書'}</h2>
                                                     <div className="text-xs text-gray-500 mb-2">発行日: {order.pickupDate}<br/><span className="font-bold">登録番号: T390001016462</span></div>
                                                     <div className="font-bold text-base">（株）N-SKETCH　のぞみの家</div>
                                                     <div className="text-xs text-gray-600 mt-1">〒997-0018 山形県鶴岡市茅原町26-23<br/>TEL 0235-26-0759 / FAX 0235-26-0758</div>
                                                 </div>
                                             </div>
-                                            <div className="font-bold text-gray-700 mb-2 text-sm">下記の通り納品申し上げます。（委託販売・総額処理方式）</div>
+                                            <div className="font-bold text-gray-700 mb-2 text-sm">{order.intro || '下記の通り納品申し上げます。（委託販売・総額処理方式）'}</div>
                                             <div className="w-1/2 border border-gray-400 p-3 rounded mb-6 bg-gray-50">
                                                 <div className="flex justify-between items-end border-b border-gray-300 pb-2 mb-2"><span className="text-sm font-bold text-gray-600">御請求金額 (税込)</span><span className="text-2xl font-bold text-gray-900">¥{totalBillingTaxIn.toLocaleString()}</span></div>
                                                 <div className="flex justify-between text-xs text-gray-600"><span>卸金額 (税抜・軽減8%)</span><span>¥{totalBillingExTax.toLocaleString()}</span></div>
                                                 <div className="flex justify-between text-xs text-gray-600 mt-1"><span>消費税額</span><span>¥{totalTaxAmount.toLocaleString()}</span></div>
                                             </div>
                                             <table className="w-full text-left border-collapse border border-gray-300 text-sm">
-                                                <thead className="bg-gray-100"><tr><th className="border border-gray-300 p-2 text-center w-10 text-xs">No.</th><th className="border border-gray-300 p-2 text-xs">品名</th><th className="border border-gray-300 p-2 text-right w-20 text-xs">納品数</th><th className="border border-gray-300 p-2 text-right w-24 text-[10px]">店頭単価<br/>(税込)</th><th className="border border-gray-300 p-2 text-right w-24 text-[10px]">委託手数料<br/>(税抜/個)</th><th className="border border-gray-300 p-2 text-right w-24 text-[10px]">卸単価<br/>(税抜/個)</th><th className="border border-gray-300 p-2 text-right w-28 text-xs">卸金額<br/>(税抜)</th></tr></thead>
+                                                <thead className="bg-gray-100"><tr><th className="border border-gray-300 p-2 text-center w-10 text-xs">No.</th><th className="border border-gray-300 p-2 text-xs">品名</th><th className="border border-gray-300 p-2 text-right w-20 text-xs">{order.qtyLabel || '納品数'}</th><th className="border border-gray-300 p-2 text-right w-24 text-[10px]">店頭単価<br/>(税込)</th><th className="border border-gray-300 p-2 text-right w-24 text-[10px]">委託手数料<br/>(税抜/個)</th><th className="border border-gray-300 p-2 text-right w-24 text-[10px]">卸単価<br/>(税抜/個)</th><th className="border border-gray-300 p-2 text-right w-28 text-xs">卸金額<br/>(税抜)</th></tr></thead>
                                                 <tbody>
                                                     {order.itemsList.map((item, i) => (
-                                                        <tr key={i}><td className="border border-gray-300 p-2 text-center">{i + 1}</td><td className="border border-gray-300 p-2 font-bold">{item.name}</td><td className="border border-gray-300 p-2 text-right">{item.qty} P</td><td className="border border-gray-300 p-2 text-right text-gray-500">¥{Number(item.storePriceTaxIn || 0).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right text-red-500">-¥{Number(item.feeAmountExTax || 0).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right font-bold">¥{Number(item.billingExTax || 0).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right font-bold text-gray-900">¥{(Number(item.billingExTax || 0) * Number(item.qty || 0)).toLocaleString()}</td></tr>
+                                                        <tr key={i}><td className="border border-gray-300 p-2 text-center">{i + 1}</td><td className="border border-gray-300 p-2 font-bold">{item.name}</td><td className="border border-gray-300 p-2 text-right">{item.qty} P</td><td className="border border-gray-300 p-2 text-right text-gray-500">¥{Number(item.storePriceTaxIn || 0).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right text-red-500">-¥{Number(item.feeAmountExTax || 0).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right font-bold">¥{Number(item.billingExTax || 0).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right font-bold text-gray-900">¥{(item.lineExTax != null ? Number(item.lineExTax) : Number(item.billingExTax || 0) * Number(item.qty || 0)).toLocaleString()}</td></tr>
                                                     ))}
                                                 </tbody>
                                             </table>
@@ -708,7 +725,9 @@
                     const since = c.last ? daysBetween(c.last, todayStr) : null;
                     const followUp = since != null && since >= (gap ? Math.max(21, gap * 2) : 30);
                     const favorites = Object.entries(c.items).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
-                    return { ...c, name: c.storeName || c.userName || '（名前なし）', avgGap: gap, daysSince: since, followUp, favorites };
+                    const rec = customerRecords.find(r => r.key === c.key) || {};
+                    const merged = { ...c, userName: rec.fullName || c.userName, storeName: c.storeName || rec.storeName || '', phone: c.phone || rec.phone || '', memo: rec.memo || '' };
+                    return { ...merged, name: merged.storeName || merged.userName || '（名前なし）', avgGap: gap, daysSince: since, followUp, favorites };
                 }).sort((a, b) => String(b.last).localeCompare(String(a.last)));
             })();
             const customerOf = (o) => customerList.find(c => c.key === custKey(o));
@@ -886,6 +905,8 @@
                             </div>
                         )}
 
+                        {memoBox({ id: 'o:' + order.id, value: order.staffMemo, onSave: m => saveOrderMemo(order, m), label: 'スタッフメモ（お客様には見えません）' })}
+                        {c && c.memo && <div className="text-xs text-gray-600 bg-yellow-50 rounded-xl px-3 py-2">👤 お客様メモ：{c.memo}</div>}
                         {c && <button type="button" onClick={() => { setSelectedOrderId(null); setActiveTab('customers'); setSelectedCustomerKey(c.key); }} className="w-full text-right text-xs font-bold text-nanairo-dark">このお客様の台帳を開く ›</button>}
                         {next && <button type="button" onClick={() => setOrderStatus(order, next[0])} className="w-full rounded-xl py-3.5 bg-nanairo-dark text-white font-bold active:opacity-90">{next[1]}</button>}
                         {!isCancelled && cur > 0 && <button type="button" onClick={() => setOrderStatus(order, steps[cur - 1][0])} className="w-full text-center text-xs text-gray-400 underline">ひとつ前の状態に戻す</button>}
@@ -1180,6 +1201,7 @@
                                 {sel.favorites.length > 0 && <div className="flex items-center gap-3 px-4 py-2.5"><span>🛒</span><span className="flex-1">よく買う：{sel.favorites.join('・')}</span></div>}
                                 {sel.avgGap && <div className="flex items-center gap-3 px-4 py-2.5"><span>🔁</span><span className="flex-1">だいたい {sel.avgGap}日ごと・最終 {shortDate(sel.last)}{sel.followUp ? '（声かけ候補）' : ''}</span></div>}
                             </div>
+                            {memoBox({ id: 'c:' + sel.key, value: sel.memo, onSave: m => saveCustomerMemo(sel.key, m), label: 'メモ（スタッフ用）' })}
                             <div className="flex gap-2">
                                 <button type="button" onClick={() => openCustomerReport(sel, monthOrders)} className="flex-1 bg-white border border-gray-200 rounded-xl py-2.5 text-xs font-bold text-gray-700">🧾 {Number(viewStartMonth.slice(5))}月の請求書</button>
                                 {unpaidList.length > 0 && <button type="button" onClick={() => openCustomerReport(sel, unpaidList)} className="flex-1 bg-white border border-red-200 rounded-xl py-2.5 text-xs font-bold text-red-600">🧾 未集金分の請求書</button>}
@@ -1275,21 +1297,23 @@
                 const back = <button type="button" onClick={() => setMoreView(null)} className="text-sm font-bold text-nanairo-dark mb-2">‹ その他</button>;
                 if (moreView === 'analytics') return <div>{back}{renderAnalyticsTab()}</div>;
                 if (moreView === 'receivables') return <div>{back}{renderReceivables()}</div>;
+                if (moreView === 'products') return <div>{back}{renderProducts()}</div>;
+                if (moreView === 'settings') return <div>{back}{renderSettings()}</div>;
                 const unpaid = orders.filter(isUnpaid);
                 const items = [
                     ['analytics', '📊', '分析', '売上・廃棄・商品別・お客様', null],
                     ['receivables', '💴', '未集金・請求', unpaid.length ? `未集金 ¥${unpaid.reduce((a, o) => a + Number(o.totalPrice || 0), 0).toLocaleString()}（${unpaid.length}件）` : '未集金はありません', unpaid.length || null],
-                    ['products', '🌿', '商品の管理', '追加・価格・販売の停止（準備中）', null],
-                    ['settings', '⚙️', '設定', '配送・送料・休業日（準備中）', null],
+                    ['products', '🌿', '商品の管理', `追加・価格・販売の停止（販売中 ${allProducts.filter(p => p.active !== false).length}／${allProducts.length}）`, null],
+                    ['settings', '⚙️', '設定', serverSettings && serverSettings.closedDays && serverSettings.closedDays.length ? `配送・送料・休業日（休業日 ${serverSettings.closedDays.length}日）` : '配送・送料・休業日', null],
                 ];
                 return (
                     <div className="max-w-[600px]">
                         <h1 className="text-lg font-bold text-gray-900 mb-2">その他</h1>
                         <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
                             {items.map(([k, icon, title, sub, badge]) => {
-                                const ready = k === 'analytics' || k === 'receivables';
+                                const ready = true;
                                 return (
-                                    <button key={k} type="button" disabled={!ready} onClick={() => setMoreView(k)} className={`w-full text-left flex items-center gap-3 px-4 py-3.5 ${ready ? 'active:bg-gray-50' : 'opacity-40'}`}>
+                                    <button key={k} type="button" disabled={!ready} onClick={() => { if (k === 'settings') setSettingsDraft(serverSettings ? JSON.parse(JSON.stringify(serverSettings)) : null); setMoreView(k); }} className={`w-full text-left flex items-center gap-3 px-4 py-3.5 ${ready ? 'active:bg-gray-50' : 'opacity-40'}`}>
                                         <span className="text-xl">{icon}</span>
                                         <div className="flex-1"><b className="text-gray-900">{title}</b><div className="text-xs text-gray-500">{sub}</div></div>
                                         {badge ? <span className="text-[11px] font-bold text-white bg-red-500 rounded-full px-2">{badge}</span> : <span className="text-gray-300">›</span>}
@@ -1301,97 +1325,288 @@
                 );
             };
 
-            const renderAgencyTab = () => {
-                const pendingDeliveries = agencyDeliveries.filter(d => d.status === "納品済");
-                const completedDeliveries = agencyDeliveries.filter(d => d.status === "精算済");
+            /* ===================== ★v5 後半：委託・商品の管理・設定・メモ ===================== */
+            const agencyPriceOf = (agencyId, pid) => { const ap = agencyPrices.find(p => p.agencyId === agencyId && p.productId === pid); return ap ? Number(ap.storePrice) : 0; };
+            const agencyStats = (a) => {
+                const all = (agencyDeliveriesAll.length ? agencyDeliveriesAll : agencyDeliveries).filter(d => d.agencyId === a.id && d.status !== '取消');
+                const pending = all.filter(d => d.status === '納品済');
+                const settled = all.filter(d => d.status === '精算済');
+                const pendingAmount = pending.reduce((s, d) => s + agencyPriceOf(a.id, d.productId) * d.deliveryQty, 0);
+                const monthSales = settled.filter(d => String(d.date).slice(0, 7) === todayMonth).reduce((s, d) => s + Math.floor(d.pureSalesExTax * 1.08), 0);
+                const delivered = settled.reduce((s, d) => s + d.deliveryQty, 0), lost = settled.reduce((s, d) => s + d.lossQty, 0);
+                const byMonth = {};
+                settled.forEach(d => { const m = String(d.date).slice(0, 7); byMonth[m] = byMonth[m] || { d: 0, l: 0 }; byMonth[m].d += d.deliveryQty; byMonth[m].l += d.lossQty; });
+                const trend = Object.keys(byMonth).sort().slice(-6).map(m => ({ m, rate: byMonth[m].d ? Math.round(byMonth[m].l / byMonth[m].d * 100) : 0 }));
+                const batches = {};
+                all.forEach(d => { const k = String(d.id).split('-')[0]; (batches[k] = batches[k] || { key: k, date: d.date, items: [] }).items.push(d); });
+                const batchList = Object.values(batches).sort((x, y) => String(y.date).localeCompare(String(x.date)) || y.key.localeCompare(x.key));
+                return { all, pending, settled, pendingAmount, monthSales, lossRate: delivered ? Math.round(lost / delivered * 100) : null, trend, last: all.map(d => d.date).sort().slice(-1)[0], batchList };
+            };
+            // 委託の書類（納品書の再発行・精算明細書）
+            const printAgencyDoc = (a, items, kind) => {
+                const settle = kind === 'settle';
+                setPrintOrders([{
+                    id: `doc-${kind}-${Date.now()}`, userName: a.name, pickupDate: toWareki(settle ? todayStr : items[0].date), isAgency: true, // 精算明細書は今日の日付で発行
+                    docTitle: settle ? '精 算 明 細 書' : '納 品 書', qtyLabel: settle ? '売れた数' : '納品数',
+                    intro: settle ? '下記の通り精算いたします。（委託販売・総額処理方式）' : '下記の通り納品申し上げます。（委託販売・総額処理方式）',
+                    itemsList: items.map(d => {
+                        const storePriceTaxIn = agencyPriceOf(a.id, d.productId);
+                        if (settle) { const q = d.salesQty || 0; return { name: d.productName, qty: q, storePriceTaxIn, feeAmountExTax: q ? Math.round(d.feeAmountExTax / q) : 0, billingExTax: q ? Math.round(d.pureSalesExTax / q) : 0, lineExTax: d.pureSalesExTax }; }
+                        const ex = Math.floor(storePriceTaxIn / 1.08), fee = Math.floor(ex * a.feeRate);
+                        return { name: d.productName, qty: d.deliveryQty, storePriceTaxIn, storePriceExTax: ex, feeAmountExTax: fee, billingExTax: ex - fee };
+                    })
+                }]);
+                setPrintType('agency_invoice');
+            };
+            const openAgencyEdit = (a) => {
+                const prices = {};
+                products.forEach(p => { prices[p.id] = a ? (agencyPriceOf(a.id, p.id) || '') : ''; });
+                setAgencyEdit({ id: a ? a.id : '', name: a ? a.name : '', feePct: a ? Math.round(a.feeRate * 100) : 20, contact: a ? (a.contact || '') : '', prices, bulk: '' });
+            };
+            const saveAgencyEdit = async () => {
+                const e = agencyEdit;
+                setIsSavingAdmin(true);
+                try {
+                    const prices = Object.keys(e.prices).filter(pid => e.prices[pid] !== '' && e.prices[pid] != null).map(pid => ({ productId: pid, storePrice: Number(e.prices[pid]) }));
+                    await postAdmin({ action: 'saveAgency', id: e.id, name: e.name, feeRate: Number(e.feePct) / 100, contact: e.contact, prices });
+                    showMessage(`${e.name} を保存しました`); setAgencyEdit(null); fetchData(viewStartMonth, viewEndMonth);
+                } catch (err) { showMessage('保存できませんでした: ' + err.message, 7000); }
+                finally { setIsSavingAdmin(false); }
+            };
 
-                return (
-                    <div className="animate-slide-up space-y-6 relative z-10">
-                        <div className="flex justify-between items-end border-l-4 border-agency pl-2">
-                            <h1 className="text-xl font-bold text-gray-800">委託(卸し)販売</h1>
-                            <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
-                        </div>
-                        <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-                            <h2 className="font-bold text-agency-dark text-base flex items-center gap-2 mb-4"><Icons.Truck className="w-5 h-5"/> 新規納品・納品書発行</h2>
-                            <div className="space-y-4">
-                                <div className="flex flex-col sm:flex-row gap-3">
-                                    <div className="w-full sm:flex-[2]">
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">委託先を選ぶ</label>
-                                        <select value={selectedAgencyId} onChange={e => setSelectedAgencyId(e.target.value)} className="w-full border border-gray-300 rounded-lg p-3 text-sm bg-gray-50 focus:ring-2 focus:ring-agency outline-none font-bold"><option value="">店舗を選択</option>{agencies.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+            const renderAgencyTab = () => {
+                const sel = agencies.find(a => a.id === agencyViewId);
+                if (sel) {
+                    const st = agencyStats(sel);
+                    const T = st.trend;
+                    return (
+                        <div className="space-y-3 max-w-[640px]">
+                            <button type="button" onClick={() => { setAgencyViewId(null); setShowDeliveryForm(false); }} className="text-sm font-bold text-nanairo-dark">‹ 委託先の一覧</button>
+                            <div className="flex items-start justify-between gap-2">
+                                <div><h2 className="text-xl font-bold text-gray-900">{sel.name}</h2><div className="text-xs text-gray-500">手数料 {Math.round(sel.feeRate * 100)}%{sel.contact ? `・${sel.contact}` : ''}{st.last ? `・最終納品 ${shortDate(st.last)}` : ''}</div></div>
+                                <button type="button" onClick={() => openAgencyEdit(sel)} className="text-xs font-bold text-gray-600 border border-gray-300 rounded-full px-3 py-1.5 shrink-0">編集</button>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className={`bg-white rounded-2xl border py-2 ${st.pending.length ? 'border-orange-200' : 'border-gray-200'}`}><div className="text-[10px] text-gray-500">未精算</div><b className={st.pending.length ? 'text-orange-600' : ''}>{st.pending.length}件</b><div className="text-[10px] text-gray-500">店頭価格で ¥{st.pendingAmount.toLocaleString()}</div></div>
+                                <div className="bg-white rounded-2xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">今月の売上（精算済）</div><b>¥{st.monthSales.toLocaleString()}</b></div>
+                                <div className="bg-white rounded-2xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">ロス率</div><b className={st.lossRate >= 30 ? 'text-red-500' : ''}>{st.lossRate != null ? `${st.lossRate}%` : '—'}</b></div>
+                            </div>
+                            <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                                <div className="text-xs font-bold text-gray-500 mb-1">ロス率の推移（精算済み・月ごと）</div>
+                                {T.length < 2 ? <div className="text-xs text-gray-400 py-2">精算が2か月分たまると、ここにグラフが出ます</div> : (
+                                    <svg viewBox="0 0 300 80" className="w-full">
+                                        <line x1="10" x2="290" y1="62" y2="62" stroke="#E5E7EB" />
+                                        <polyline fill="none" stroke="#EF4444" strokeWidth="2.5" points={T.map((t, i) => `${10 + i * 280 / (T.length - 1)},${62 - Math.min(100, t.rate) * 0.5}`).join(' ')} />
+                                        {T.map((t, i) => <g key={t.m}><circle cx={10 + i * 280 / (T.length - 1)} cy={62 - Math.min(100, t.rate) * 0.5} r="3.5" fill="#EF4444" /><text x={10 + i * 280 / (T.length - 1)} y={62 - Math.min(100, t.rate) * 0.5 - 7} fontSize="9" fill="#EF4444" textAnchor="middle">{t.rate}%</text><text x={10 + i * 280 / (T.length - 1)} y="76" fontSize="9" fill="#9CA3AF" textAnchor="middle">{Number(t.m.slice(5))}月</text></g>)}
+                                    </svg>
+                                )}
+                            </div>
+
+                            {!showDeliveryForm ? (
+                                <button type="button" onClick={() => { setSelectedAgencyId(sel.id); setDeliveryCart({}); setShowDeliveryForm(true); }} className="w-full rounded-xl py-3 bg-nanairo-dark text-white font-bold">この委託先に納品する</button>
+                            ) : (
+                                <div className="bg-white rounded-2xl border border-gray-200 p-3 space-y-3">
+                                    <div className="flex items-center justify-between"><b className="text-sm">🚚 納品する</b><button type="button" onClick={() => setShowDeliveryForm(false)} className="text-xs text-gray-400">閉じる</button></div>
+                                    <div className="flex items-center gap-2 text-sm"><span className="text-gray-500 shrink-0">納品日</span><input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className="flex-1 min-w-0 appearance-none border border-gray-300 rounded-lg px-3 py-2 font-bold bg-white" /></div>
+                                    <div className="divide-y divide-gray-100">
+                                        {products.map(p => { const qty = deliveryCart[p.id] || 0; const price = agencyPriceOf(sel.id, p.id); return (
+                                            <div key={p.id} className="flex items-center justify-between py-2 gap-2">
+                                                <div className="min-w-0"><b className="text-sm text-gray-900">{p.name}</b><div className="text-[11px] text-gray-500">店頭 {price ? `¥${price}` : '価格未設定'}・在庫 {p.stock}</div></div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <button type="button" onClick={() => updateDeliveryCart(p.id, -1)} className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-500"><Icons.Minus className="w-4 h-4" /></button>
+                                                    <b className={`w-6 text-center ${qty ? 'text-nanairo-dark' : 'text-gray-300'}`}>{qty}</b>
+                                                    <button type="button" onClick={() => updateDeliveryCart(p.id, 1)} disabled={qty >= p.stock} className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${qty >= p.stock ? 'bg-gray-300' : 'bg-nanairo-dark'}`}><Icons.Plus className="w-4 h-4" /></button>
+                                                </div>
+                                            </div>); })}
                                     </div>
-                                    <div className="w-full sm:flex-[1]">
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">納品日</label>
-                                        <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className="block w-full min-w-0 max-w-full box-border appearance-none border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-agency outline-none font-bold" />
+                                    <button type="button" onClick={handleAgencyDelivery} disabled={Object.keys(deliveryCart).length === 0 || isSubmittingDelivery} className={`w-full py-3 rounded-xl font-bold text-white flex justify-center items-center gap-2 ${Object.keys(deliveryCart).length === 0 || isSubmittingDelivery ? 'bg-gray-300' : 'bg-nanairo-dark'}`}>{isSubmittingDelivery ? <><div className="spinner"></div> 記録中…</> : '納品して納品書を発行'}</button>
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">未精算（売れた数とロスを入れて精算）</b><span className="text-xs text-gray-500">{st.pending.length}件</span></div>
+                            {st.pending.length === 0 ? <div className="text-center py-5 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">未精算の納品はありません</div> : (
+                                <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                                    {st.pending.map(d => (
+                                        <div key={d.id} className="flex items-center gap-2 px-3 py-2.5">
+                                            <div className="flex-1 min-w-0"><b className="text-sm">{d.productName}</b> <span className="text-sm">× {d.deliveryQty}</span><div className="text-xs text-gray-500">{shortDate(d.date)} 納品</div></div>
+                                            <button type="button" onClick={() => { setInventoryModal(d); setInvSalesQty(d.deliveryQty); setInvLossQty(0); }} className="text-xs font-bold text-white bg-orange-500 rounded-lg px-3 py-2">精算する</button>
+                                            <button type="button" onClick={() => setCancelDeliveryTarget(d)} className="text-xs text-gray-400 underline">取消</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">納品と精算の履歴</b><span className="text-xs text-gray-500">{st.batchList.length}回</span></div>
+                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                                {st.batchList.length === 0 && <div className="text-center py-5 text-gray-400 text-sm">まだ納品がありません</div>}
+                                {st.batchList.map(b => {
+                                    const settledItems = b.items.filter(d => d.status === '精算済');
+                                    const allSettled = settledItems.length === b.items.length;
+                                    return (
+                                        <div key={b.key} className="px-3 py-2.5">
+                                            <div className="flex justify-between items-start gap-2">
+                                                <span className="text-sm"><b>{shortDate(b.date)} 納品</b>　{b.items.map(d => `${d.productName}${d.deliveryQty}`).join('・')}</span>
+                                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${allSettled ? 'bg-gray-100 text-gray-600' : 'bg-orange-50 text-orange-700'}`}>{allSettled ? `精算済 ¥${settledItems.reduce((s, d) => s + Math.floor(d.pureSalesExTax * 1.08), 0).toLocaleString()}` : '未精算あり'}</span>
+                                            </div>
+                                            {settledItems.length > 0 && <div className="text-[11px] text-gray-500 mt-0.5">{settledItems.map(d => `${d.productName} 売れた${d.salesQty}・ロス${d.lossQty}`).join('／')}</div>}
+                                            <div className="flex flex-wrap gap-3 mt-1 text-[11px] font-bold">
+                                                <button type="button" onClick={() => printAgencyDoc(sel, b.items, 'deliver')} className="text-gray-500">🖨 納品書を再発行</button>
+                                                {settledItems.length > 0 && <button type="button" onClick={() => printAgencyDoc(sel, settledItems, 'settle')} className="text-gray-500">🖨 精算明細書</button>}
+                                                {settledItems.map(d => <button key={d.id} type="button" onClick={() => setCancelInventoryTarget(d)} className="text-gray-400 underline font-normal">{d.productName}の精算を取消</button>)}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                }
+                const allSettledMonth = (agencyDeliveriesAll.length ? agencyDeliveriesAll : agencyDeliveries).filter(d => d.status !== '取消' && String(d.date).slice(0, 7) === todayMonth);
+                return (
+                    <div className="space-y-3 max-w-[640px]">
+                        <div className="flex items-center justify-between">
+                            <h1 className="text-lg font-bold text-gray-900">委託先</h1>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => openAgencyEdit(null)} className="text-sm font-bold text-white bg-nanairo-dark rounded-full px-4 py-2">＋ 委託先を追加</button>
+                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full border border-gray-200 text-gray-500"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
+                            </div>
+                        </div>
+                        {agencies.length === 0 && <div className="text-center py-8 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">委託先がありません。「＋ 委託先を追加」から登録できます。</div>}
+                        {agencies.map(a => {
+                            const st = agencyStats(a);
+                            return (
+                                <div key={a.id} className="bg-white rounded-2xl border border-gray-200 p-3">
+                                    <button type="button" onClick={() => setAgencyViewId(a.id)} className="w-full text-left flex items-center justify-between gap-2">
+                                        <div className="min-w-0"><b className="text-gray-900">{a.name}</b><div className="text-xs text-gray-500">手数料 {Math.round(a.feeRate * 100)}%{st.last ? `・最終納品 ${shortDate(st.last)}` : ''}{st.lossRate != null ? `・ロス率 ${st.lossRate}%` : ''}</div></div>
+                                        {st.pending.length ? <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-orange-50 text-orange-700 border border-orange-200 whitespace-nowrap">未精算 {st.pending.length}件</span> : <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-500 whitespace-nowrap">精算済み</span>}
+                                    </button>
+                                    <div className="grid grid-cols-2 gap-2 mt-3 text-sm font-bold">
+                                        <button type="button" onClick={() => { setAgencyViewId(a.id); setSelectedAgencyId(a.id); setDeliveryCart({}); setShowDeliveryForm(true); }} className="py-2.5 rounded-xl bg-nanairo-dark text-white">納品する</button>
+                                        <button type="button" onClick={() => setAgencyViewId(a.id)} disabled={!st.pending.length} className={`py-2.5 rounded-xl border ${st.pending.length ? 'border-gray-300 text-gray-700' : 'border-gray-200 text-gray-300'}`}>精算する</button>
                                     </div>
                                 </div>
-                                {selectedAgencyId && (
-                                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                                        <p className="text-xs font-bold text-gray-500 mb-2">納品する商品と数</p>
-                                        <div className="space-y-2">
-                                            {products.map(p => {
-                                                const ap = agencyPrices.find(pr => pr.agencyId === selectedAgencyId && pr.productId === p.id);
-                                                const storePrice = ap ? ap.storePrice : "未設定"; const qty = deliveryCart[p.id] || 0;
-                                                return (
-                                                    <div key={p.id} className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
-                                                        <div className="flex-1 min-w-0 pr-2">
-                                                            <div className="font-bold text-gray-800 text-sm truncate">{p.name}</div>
-                                                            <div className="text-[10px] text-gray-500 truncate">店頭税込: {storePrice}円 / 在庫: {p.stock}</div>
-                                                        </div>
-                                                        <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden h-10 shrink-0">
-                                                            <button type="button" onClick={() => updateDeliveryCart(p.id, -1)} className="w-10 h-full bg-gray-100 flex items-center justify-center text-gray-600 active:bg-gray-200"><Icons.Minus className="w-4 h-4"/></button>
-                                                            <div className="w-10 text-center font-bold text-base bg-white pt-2">{qty}</div>
-                                                            <button type="button" onClick={() => updateDeliveryCart(p.id, 1)} disabled={qty >= p.stock} className={`w-10 h-full flex items-center justify-center ${qty >= p.stock ? 'bg-gray-50 text-gray-300' : 'bg-gray-100 text-gray-600 active:bg-gray-200'}`}><Icons.Plus className="w-4 h-4"/></button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-                                <button type="button" onClick={handleAgencyDelivery} disabled={!selectedAgencyId || Object.keys(deliveryCart).length === 0 || isSubmittingDelivery} className={`w-full py-4 rounded-xl font-bold text-base shadow-sm transition-colors flex justify-center items-center gap-2 mt-4 ${(!selectedAgencyId || Object.keys(deliveryCart).length === 0 || isSubmittingDelivery) ? 'bg-gray-300 text-gray-500' : 'bg-agency text-white active:bg-orange-600'}`}>
-                                    {isSubmittingDelivery ? <><div className="spinner"></div> 処理中...</> : <><Icons.FileText className="w-5 h-5"/> 納品して納品書を発行</>}
+                            );
+                        })}
+                        {agencies.length > 0 && (
+                            <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                                <div className="bg-white rounded-xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">今月の納品</div><b className="text-lg">{allSettledMonth.reduce((s, d) => s + d.deliveryQty, 0)}</b></div>
+                                <div className="bg-white rounded-xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">売れた（精算済）</div><b className="text-lg text-nanairo-dark">{allSettledMonth.reduce((s, d) => s + (d.status === '精算済' ? d.salesQty : 0), 0)}</b></div>
+                                <div className="bg-white rounded-xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">ロス（精算済）</div><b className="text-lg text-red-500">{allSettledMonth.reduce((s, d) => s + (d.status === '精算済' ? d.lossQty : 0), 0)}</b></div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            // 商品の管理
+            const toggleProductActive = async (p) => {
+                setAllProducts(prev => prev.map(x => x.id === p.id ? { ...x, active: !p.active } : x));
+                try { await postAdmin({ action: 'saveProduct', id: p.id, name: p.name, price: p.price, weight: String(p.weight).replace(/g$/, ''), desc: p.desc || '', active: !p.active }); showMessage(`${p.name} を${p.active ? '販売停止' : '販売中'}にしました`); fetchData(viewStartMonth, viewEndMonth); }
+                catch (e) { showMessage('変更できませんでした: ' + e.message, 7000); fetchData(viewStartMonth, viewEndMonth); }
+            };
+            const saveProductEdit = async () => {
+                const e = productEdit;
+                setIsSavingAdmin(true);
+                try {
+                    await postAdmin({ action: 'saveProduct', id: e.id, name: e.name, price: Number(e.price), weight: e.weight, desc: e.desc, active: e.active });
+                    showMessage(`${e.name} を保存しました`); setProductEdit(null); fetchData(viewStartMonth, viewEndMonth);
+                } catch (err) { showMessage('保存できませんでした: ' + err.message, 7000); }
+                finally { setIsSavingAdmin(false); }
+            };
+            const renderProducts = () => (
+                <div className="space-y-3 max-w-[600px]">
+                    <div className="flex items-center justify-between"><h2 className="text-lg font-bold text-gray-900">商品の管理</h2>
+                        <button type="button" onClick={() => setProductEdit({ id: '', name: '', price: 200, weight: '5', desc: '', active: true })} className="text-sm font-bold text-white bg-nanairo-dark rounded-full px-4 py-2">＋ 商品を追加</button></div>
+                    <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                        {allProducts.map(p => (
+                            <div key={p.id} className={`flex items-center gap-3 px-3 py-2.5 ${p.active === false ? 'opacity-50' : ''}`}>
+                                <button type="button" onClick={() => setProductEdit({ ...p, weight: String(p.weight).replace(/g$/, ''), desc: p.desc || '', active: p.active !== false })} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                                    {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" /> : <div className="w-11 h-11 rounded-lg bg-nanairo-light flex items-center justify-center text-[9px] text-nanairo-dark font-bold shrink-0 text-center leading-tight">写真<br />なし</div>}
+                                    <div className="min-w-0"><b className="text-sm text-gray-900">{p.name}</b><div className="text-xs text-gray-500 truncate">¥{p.price}・{p.weight}{p.desc ? `・${p.desc}` : ''}</div></div>
                                 </button>
+                                <button type="button" onClick={() => toggleProductActive({ ...p, active: p.active !== false })} className="text-center shrink-0"><Switch on={p.active !== false} /><div className={`text-[9px] font-bold ${p.active !== false ? 'text-nanairo-dark' : 'text-gray-500'}`}>{p.active !== false ? '販売中' : '停止中'}</div></button>
                             </div>
-                        </section>
+                        ))}
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">スイッチで注文画面に出す・出さないを切り替えます（在庫や過去の記録は残ります）。商品名を変えても在庫はずれません。<br />写真は今のところ追加できません。新しい写真はファイルを送ってもらえれば入れます。</p>
+                </div>
+            );
 
-                        <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-                            <h2 className="font-bold text-gray-800 mb-4 text-base flex items-center gap-2"><Icons.Store className="w-5 h-5 text-agency-dark"/> 棚卸し・売上回収 (未精算)</h2>
-                            <p className="text-[10px] text-gray-500 mb-3">店舗に赴き、売れた数と回収した数(ロス)を入力して精算を確定させます。</p>
-                            <div className="space-y-3">
-                                {pendingDeliveries.length === 0 ? <p className="text-sm text-gray-400 text-center py-4 bg-gray-50 rounded-lg">未精算の納品はありません。</p> : (
-                                    pendingDeliveries.map(d => (
-                                        <div key={d.id} className="border border-agency/30 bg-orange-50/50 p-3 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 relative">
-                                            <div className="pr-6 w-full">
-                                                <span className="text-[10px] font-bold text-agency-dark bg-orange-100 px-1.5 py-0.5 rounded">{d.agencyName}</span>
-                                                <div className="font-bold text-gray-800 text-sm mt-1.5">{d.productName}</div>
-                                                <div className="text-xs text-gray-600 mt-0.5">納品数: <span className="font-bold text-base">{d.deliveryQty} P</span> <span className="text-[10px] text-gray-400 ml-1">({d.date})</span></div>
-                                            </div>
-                                            <button onClick={() => { setInventoryModal(d); setInvSalesQty(d.deliveryQty); setInvLossQty(0); }} className="bg-agency text-white text-xs font-bold px-4 py-2.5 rounded-lg active:bg-agency-dark shadow-sm w-full sm:w-auto shrink-0">棚卸し入力</button>
-                                            <button onClick={() => setCancelDeliveryTarget(d)} className="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-red-500 bg-white rounded-full shadow-sm active:bg-gray-100"><Icons.X className="w-3.5 h-3.5" /></button>
-                                        </div>
-                                    ))
-                                )}
+            // 設定
+            const HOUR_SLOTS = ['09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00'];
+            const saveSettingsDraft = async () => {
+                setIsSavingAdmin(true);
+                try {
+                    const res = await postAdmin({ action: 'saveSettings', settings: settingsDraft });
+                    setServerSettings(res.settings); setSettingsDraft(JSON.parse(JSON.stringify(res.settings)));
+                    showMessage('設定を保存しました（注文画面にもすぐ反映されます）');
+                } catch (err) { showMessage('保存できませんでした: ' + err.message, 7000); }
+                finally { setIsSavingAdmin(false); }
+            };
+            const renderSettings = () => {
+                const st = settingsDraft;
+                if (!st) return <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 text-sm text-yellow-800 max-w-[600px]">設定を読み込めませんでした。GASを最新版にしてから、もう一度開いてください。</div>;
+                const set = (k, v) => setSettingsDraft(prev => ({ ...prev, [k]: v }));
+                const toggleIn = (k, v) => set(k, st[k].includes(v) ? st[k].filter(x => x !== v) : [...st[k], v].sort());
+                const cal = [];
+                for (let i = 0; i < 63; i++) cal.push(new Date(Date.now() + 9 * 3600 * 1000 + i * 86400000).toISOString().slice(0, 10));
+                const firstWd = new Date(cal[0] + 'T00:00:00Z').getUTCDay();
+                const changed = JSON.stringify(st) !== JSON.stringify(serverSettings);
+                return (
+                    <div className="space-y-3 max-w-[600px] pb-20">
+                        <h2 className="text-lg font-bold text-gray-900">設定</h2>
+                        <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                            <b className="text-sm">🚚 配送</b>
+                            <div className="text-[11px] font-bold text-gray-500 mt-2 mb-1">配送する曜日</div>
+                            <div className="grid grid-cols-7 gap-1 text-center text-sm font-bold">
+                                {['日', '月', '火', '水', '木', '金', '土'].map((w, i) => <button key={w} type="button" onClick={() => toggleIn('deliveryDays', i)} className={`py-2 rounded-lg ${st.deliveryDays.includes(i) ? 'bg-nanairo-dark text-white' : 'bg-gray-100 text-gray-400'}`}>{w}</button>)}
                             </div>
-                        </section>
+                            <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
+                                <label><div className="text-[11px] font-bold text-gray-500 mb-1">時間</div><input value={st.deliveryTime} onChange={e => set('deliveryTime', e.target.value)} placeholder="16:00-17:00" className="w-full border border-gray-300 rounded-lg px-2 py-2 font-bold" /></label>
+                                <label><div className="text-[11px] font-bold text-gray-500 mb-1">送料（円）</div><input type="number" inputMode="numeric" value={st.deliveryFee} onChange={e => set('deliveryFee', e.target.value === '' ? '' : Number(e.target.value))} className="w-full border border-gray-300 rounded-lg px-2 py-2 font-bold" /></label>
+                                <label><div className="text-[11px] font-bold text-gray-500 mb-1">無料になる額</div><input type="number" inputMode="numeric" value={st.freeThreshold} onChange={e => set('freeThreshold', e.target.value === '' ? '' : Number(e.target.value))} className="w-full border border-gray-300 rounded-lg px-2 py-2 font-bold" /></label>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                            <b className="text-sm">🏪 店頭受け取りの時間帯</b>
+                            <div className="flex flex-wrap gap-1.5 mt-2 text-xs font-bold">
+                                {HOUR_SLOTS.map(t => <button key={t} type="button" onClick={() => toggleIn('pickupTimes', t)} className={`px-2.5 py-1.5 rounded-lg ${st.pickupTimes.includes(t) ? 'bg-nanairo-light text-nanairo-dark border border-nanairo' : 'bg-gray-100 text-gray-400 border border-transparent'}`}>{t.replace(':00-', '-').replace(':00', '')}時</button>)}
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                            <b className="text-sm">📅 休業日（受け取り・配送を止める日）</b>
+                            <div className="grid grid-cols-7 gap-1 text-center text-[11px] mt-2">
+                                {['日', '月', '火', '水', '木', '金', '土'].map((w, i) => <span key={w} className={i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-gray-500'}>{w}</span>)}
+                                {Array.from({ length: firstWd }).map((_, i) => <span key={'e' + i}></span>)}
+                                {cal.map((d, i) => { const closed = st.closedDays.includes(d); const [, m, dd] = d.split('-').map(Number); return (
+                                    <button key={d} type="button" disabled={i === 0} onClick={() => toggleIn('closedDays', d)} className={`py-1.5 rounded ${closed ? 'bg-red-500 text-white font-bold' : i === 0 ? 'text-gray-300' : 'bg-gray-50 text-gray-700'}`}>{dd === 1 || i === 0 ? `${m}/${dd}` : dd}</button>); })}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-2">{st.closedDays.length ? `休業日：${st.closedDays.map(d => shortDate(d)).join('、')}（注文画面で選べなくなります）` : 'タップで休業日を設定します。'}</div>
+                        </div>
+                        <div className="fixed left-0 right-0 bottom-[76px] lg:bottom-0 z-30 mx-auto w-full max-w-[600px] px-4 py-3 bg-gradient-to-t from-gray-100 to-transparent">
+                            <button type="button" onClick={saveSettingsDraft} disabled={!changed || isSavingAdmin} className={`w-full rounded-xl py-3.5 font-bold shadow-lg text-white ${!changed || isSavingAdmin ? 'bg-gray-300' : 'bg-nanairo-dark'}`}>{isSavingAdmin ? '保存中…' : changed ? '保存する' : '変更はありません'}</button>
+                        </div>
+                    </div>
+                );
+            };
 
-                        <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
-                            <h3 className="font-bold text-gray-700 text-sm mb-3">最近の精算履歴</h3>
-                            <div className="space-y-2">
-                                {completedDeliveries.slice(0, 10).map(d => (
-                                    <div key={d.id} className="text-xs flex justify-between items-center border-b border-gray-100 pb-2 last:border-0 last:pb-0 relative">
-                                        <div className="flex-1 min-w-0 pr-2">
-                                            <span className="font-bold text-gray-700">{d.agencyName}</span><span className="text-gray-500 ml-1">{d.productName}</span>
-                                            <div className="text-[9px] text-gray-400 mt-0.5">納品:{d.deliveryQty} 売上:{d.salesQty} ロス:{d.lossQty} ({d.date})</div>
-                                        </div>
-                                        <div className="text-right flex items-center gap-2 shrink-0">
-                                            <div className="font-bold text-agency-dark">¥{(Number(d.pureSalesExTax || 0) * 1.08).toLocaleString()} <span className="text-[9px] font-normal text-gray-500">(込)</span></div>
-                                            <button onClick={() => setCancelInventoryTarget(d)} className="bg-white border border-gray-200 text-gray-400 hover:text-red-500 p-1.5 rounded active:bg-gray-50 shadow-sm"><Icons.X className="w-3 h-3" /></button>
-                                        </div>
-                                    </div>
-                                ))}
-                                {completedDeliveries.length === 0 && <p className="text-xs text-gray-400">履歴なし</p>}
-                            </div>
-                        </section>
+            // メモ（注文・お客様）
+            const saveOrderMemo = async (order, memo) => {
+                try { await postAdmin({ action: 'saveMemo', kind: 'order', orderId: order.id, memo }); setOrders(p => p.map(o => o.id === order.id ? { ...o, staffMemo: memo } : o)); showMessage('メモを保存しました'); }
+                catch (e) { showMessage('メモを保存できませんでした: ' + e.message, 7000); }
+            };
+            const saveCustomerMemo = async (key, memo) => {
+                try { await postAdmin({ action: 'saveMemo', kind: 'customer', key, memo }); setCustomerRecords(p => p.some(r => r.key === key) ? p.map(r => r.key === key ? { ...r, memo } : r) : [...p, { key, memo }]); showMessage('メモを保存しました'); }
+                catch (e) { showMessage('メモを保存できませんでした: ' + e.message, 7000); }
+            };
+            const memoBox = ({ id, value, onSave, label }) => {
+                const draft = memoDrafts[id] != null ? memoDrafts[id] : (value || '');
+                const dirty = draft !== (value || '');
+                return (
+                    <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                        <div className="text-xs font-bold text-gray-500 mb-1">📝 {label}</div>
+                        <textarea value={draft} onChange={e => setMemoDrafts(p => ({ ...p, [id]: e.target.value }))} placeholder="例：裏口から納品。月末にまとめて集金。" className="w-full text-sm bg-yellow-50 rounded-lg p-2 h-16 resize-none outline-none focus:ring-2 focus:ring-yellow-300" />
+                        {dirty && <button type="button" onClick={async () => { await onSave(draft); setMemoDrafts(p => { const n = { ...p }; delete n[id]; return n; }); }} className="mt-1 w-full py-2 rounded-lg bg-gray-900 text-white text-xs font-bold">メモを保存</button>}
                     </div>
                 );
             };
@@ -1772,7 +1987,7 @@
             }
 
             const TABS = [['orders', '注文', Icons.ClipboardList], ['inventory', '在庫', Icons.Box], ['agency', '委託', Icons.Store], ['customers', 'お客様', Icons.User], ['more', 'その他', Icons.BarChart]];
-            const goTab = (k) => { setActiveTab(k); if (k === 'more') setMoreView(null); if (k === 'customers') setSelectedCustomerKey(null); if (k !== 'inventory') setBulkMode(false); };
+            const goTab = (k) => { setActiveTab(k); if (k === 'more') setMoreView(null); if (k === 'customers') setSelectedCustomerKey(null); if (k !== 'inventory') setBulkMode(false); if (k === 'agency') { setAgencyViewId(null); setShowDeliveryForm(false); } };
             const unpaidBadge = orders.filter(o => o.status === '受渡済' && !o.paidChecked).length;
 
             return (
@@ -1808,6 +2023,42 @@
                         {activeTab === 'more' && renderMoreTab()}
                     </main>
 
+                    {productEdit && (
+                        <div className="no-print fixed inset-0 bg-black/40 z-[60] flex flex-col justify-end lg:justify-center items-center" onClick={() => !isSavingAdmin && setProductEdit(null)}>
+                            <div className="bg-white rounded-t-3xl lg:rounded-3xl w-full max-w-[520px] p-4 space-y-3 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+                                <div className="flex items-center justify-between"><b className="text-gray-900">{productEdit.id ? `${productEdit.name} を編集` : '商品を追加'}</b><button type="button" onClick={() => setProductEdit(null)} className="p-1.5 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button></div>
+                                <label className="block"><div className="text-[11px] font-bold text-gray-500 mb-1">商品名</div><input value={productEdit.name} maxLength={30} onChange={e => setProductEdit({ ...productEdit, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 font-bold" /></label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label><div className="text-[11px] font-bold text-gray-500 mb-1">価格（税込・円）</div><input type="number" inputMode="numeric" value={productEdit.price} onChange={e => setProductEdit({ ...productEdit, price: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 font-bold" /></label>
+                                    <label><div className="text-[11px] font-bold text-gray-500 mb-1">内容量（g）</div><input value={productEdit.weight} onChange={e => setProductEdit({ ...productEdit, weight: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 font-bold" /></label>
+                                </div>
+                                <label className="block"><div className="text-[11px] font-bold text-gray-500 mb-1">一言説明（注文画面に表示・40文字まで）</div><input value={productEdit.desc} maxLength={40} onChange={e => setProductEdit({ ...productEdit, desc: e.target.value })} placeholder="例：ごまの香り・ピリッと辛い" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" /></label>
+                                <button type="button" onClick={() => setProductEdit({ ...productEdit, active: !productEdit.active })} className="w-full flex items-center justify-between px-1"><span className="text-sm text-gray-700">注文画面に出す（販売中）</span><Switch on={productEdit.active} /></button>
+                                {productEdit.id && <p className="text-[11px] text-gray-500">名前を変えても在庫・過去の記録はそのまま引き継がれます。</p>}
+                                <button type="button" onClick={saveProductEdit} disabled={isSavingAdmin || !productEdit.name.trim()} className={`w-full rounded-xl py-3 font-bold text-white ${isSavingAdmin || !productEdit.name.trim() ? 'bg-gray-300' : 'bg-nanairo-dark'}`}>{isSavingAdmin ? '保存中…' : '保存する'}</button>
+                            </div>
+                        </div>
+                    )}
+                    {agencyEdit && (
+                        <div className="no-print fixed inset-0 bg-black/40 z-[60] flex flex-col justify-end lg:justify-center items-center" onClick={() => !isSavingAdmin && setAgencyEdit(null)}>
+                            <div className="bg-white rounded-t-3xl lg:rounded-3xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto p-4 space-y-3 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+                                <div className="flex items-center justify-between"><b className="text-gray-900">{agencyEdit.id ? '委託先を編集' : '委託先を追加'}</b><button type="button" onClick={() => setAgencyEdit(null)} className="p-1.5 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button></div>
+                                <label className="block"><div className="text-[11px] font-bold text-gray-500 mb-1">店舗名</div><input value={agencyEdit.name} maxLength={40} onChange={e => setAgencyEdit({ ...agencyEdit, name: e.target.value })} placeholder="例：道の駅○○" className="w-full border border-gray-300 rounded-lg px-3 py-2 font-bold" /></label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label><div className="text-[11px] font-bold text-gray-500 mb-1">委託手数料（%）</div><input type="number" inputMode="numeric" value={agencyEdit.feePct} onChange={e => setAgencyEdit({ ...agencyEdit, feePct: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 font-bold" /></label>
+                                    <label><div className="text-[11px] font-bold text-gray-500 mb-1">担当者・連絡先（任意）</div><input value={agencyEdit.contact} onChange={e => setAgencyEdit({ ...agencyEdit, contact: e.target.value })} placeholder="佐藤さん 0235-…" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" /></label>
+                                </div>
+                                <div>
+                                    <div className="flex items-center justify-between mb-1"><span className="text-[11px] font-bold text-gray-500">店頭での販売価格（税込）</span>
+                                        <span className="flex items-center gap-1 text-[11px]"><input type="number" inputMode="numeric" value={agencyEdit.bulk} onChange={e => setAgencyEdit({ ...agencyEdit, bulk: e.target.value })} placeholder="250" className="w-16 border border-gray-300 rounded px-1.5 py-1" /><button type="button" onClick={() => { if (agencyEdit.bulk === '') return; const pr = {}; products.forEach(p => { pr[p.id] = agencyEdit.bulk; }); setAgencyEdit({ ...agencyEdit, prices: pr }); }} className="font-bold text-nanairo-dark">円に全部そろえる</button></span></div>
+                                    <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                                        {products.map(p => <div key={p.id} className="flex items-center justify-between px-3 py-1.5 text-sm"><span>{p.name}</span><span className="flex items-center gap-1">¥<input type="number" inputMode="numeric" value={agencyEdit.prices[p.id]} onChange={e => setAgencyEdit({ ...agencyEdit, prices: { ...agencyEdit.prices, [p.id]: e.target.value } })} placeholder="未設定" className="w-20 text-right border border-gray-200 rounded px-2 py-1 font-bold" /></span></div>)}
+                                    </div>
+                                </div>
+                                <button type="button" onClick={saveAgencyEdit} disabled={isSavingAdmin || !agencyEdit.name.trim()} className={`w-full rounded-xl py-3 font-bold text-white ${isSavingAdmin || !agencyEdit.name.trim() ? 'bg-gray-300' : 'bg-nanairo-dark'}`}>{isSavingAdmin ? '保存中…' : agencyEdit.id ? '保存する' : '追加する'}</button>
+                            </div>
+                        </div>
+                    )}
                     {stockSheetOpen && (() => {
                         const p = products.find(x => x.id === selectedProductId);
                         if (!p) return null;
