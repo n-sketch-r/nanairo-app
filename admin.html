@@ -177,11 +177,42 @@
             const [invSalesQty, setInvSalesQty] = useState(0);
             const [invLossQty, setInvLossQty] = useState(0);
 
+            // ★管理者パスワード（この端末にだけ保存。GASでハッシュ照合します）
+            const readSavedKey = () => { try { return localStorage.getItem('nanairo_admin_key') || ''; } catch (e) { return ''; } };
+            const [adminKey, setAdminKey] = useState(readSavedKey);
+            const adminKeyRef = React.useRef(adminKey);
+            adminKeyRef.current = adminKey;
+            const getAdminKey = () => adminKeyRef.current;
+            const [loginInput, setLoginInput] = useState('');
+            const [loginError, setLoginError] = useState('');
+            const [isLoggingIn, setIsLoggingIn] = useState(false);
+            const logout = (msg) => {
+                try { localStorage.removeItem('nanairo_admin_key'); } catch (e) {}
+                setAdminKey(''); setIsLoadingData(true); setLoginError(msg || '');
+            };
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                if (!loginInput || isLoggingIn) return;
+                setIsLoggingIn(true); setLoginError('');
+                try {
+                    const res = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ adminKey: getAdminKey(), action: "checkAdmin", adminKey: loginInput }) });
+                    const d = await res.json();
+                    if (d.status === 'success') {
+                        try { localStorage.setItem('nanairo_admin_key', loginInput); } catch (e) {}
+                        adminKeyRef.current = loginInput;
+                        setAdminKey(loginInput); setLoginInput('');
+                    } else setLoginError('パスワードが違います。');
+                } catch (err) { setLoginError('通信エラーが発生しました。'); }
+                finally { setIsLoggingIn(false); }
+            };
+
             const fetchData = async (startMonth, endMonth) => {
+                if (!adminKeyRef.current) { setIsLoadingData(false); return; }
                 setIsFetchingData(true);
                 try {
-                    const response = await fetch(`${GAS_URL}?action=getAdminData&month=${startMonth}&endMonth=${endMonth}`);
+                    const response = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ adminKey: getAdminKey(), action: "getAdminData", adminKey: getAdminKey(), month: startMonth, endMonth: endMonth }) });
                     const data = await response.json();
+                    if (data.message === 'AUTH_REQUIRED') return logout('パスワードが変更されたか、正しくありません。もう一度入力してください。');
                     if (data.status === 'error') return showMessage("データの取得に失敗しました。");
                     
                     if (data.products) setProducts(data.products.filter(p => p.name !== "なないろ菜"));
@@ -202,7 +233,7 @@
             useEffect(() => {
                 if (viewStartMonth > viewEndMonth) setViewEndMonth(viewStartMonth);
                 fetchData(viewStartMonth, viewEndMonth);
-            }, [viewStartMonth, viewEndMonth]);
+            }, [viewStartMonth, viewEndMonth, adminKey]);
 
             const handleRefresh = () => fetchData(viewStartMonth, viewEndMonth);
 
@@ -220,7 +251,7 @@
                 try {
                     await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo })
                     });
                     const actionName = type === 'add' ? '収穫(追加)' : type === 'sale' ? '店頭販売' : 'ロス(破棄)';
                     showMessage(`${amount}件の「${actionName}」を記録しました！`);
@@ -234,7 +265,7 @@
                 try {
                     await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "bulkLoss" })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "bulkLoss" })
                     });
                     showMessage(`現在在庫がある全商品を一括でロス(破棄)にしました！`);
                     fetchData(viewStartMonth, viewEndMonth);
@@ -248,7 +279,7 @@
                 try {
                     const res = await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "cancelStockLog", rowIndex: cancelTargetLog.rowIndex })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "cancelStockLog", rowIndex: cancelTargetLog.rowIndex })
                     });
                     const data = await res.json();
                     if (data.status === 'error') showMessage("取消エラー: " + data.message);
@@ -264,7 +295,7 @@
                 try {
                     await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "statusUpdate", orderId: orderId, newStatus: nextStatus })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "statusUpdate", orderId: orderId, newStatus: nextStatus })
                     });
                     fetchData(viewStartMonth, viewEndMonth);
                 } catch(error) {
@@ -278,7 +309,7 @@
                 try {
                     await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "toggleCheck", orderId: orderId, role: role, isChecked: isChecked })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "toggleCheck", orderId: orderId, role: role, isChecked: isChecked })
                     });
                 } catch(error) { showMessage("確認状態の更新に失敗しました。"); fetchData(viewStartMonth, viewEndMonth); }
             };
@@ -330,7 +361,7 @@
                 try {
                     await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "agencyDelivery", agencyId: agency.id, agencyName: agency.name, items: itemsToDeliver, deliveryDate: deliveryDate })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "agencyDelivery", agencyId: agency.id, agencyName: agency.name, items: itemsToDeliver, deliveryDate: deliveryDate })
                     });
                     showMessage(`${agency.name} への納品を記録しました！`);
                     
@@ -360,7 +391,7 @@
                 try {
                     await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "agencyInventory", deliveryId: d.id, salesQty: invSalesQty, lossQty: invLossQty })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "agencyInventory", deliveryId: d.id, salesQty: invSalesQty, lossQty: invLossQty })
                     });
                     showMessage(`棚卸し（精算）を完了しました！`);
                     setInventoryModal(null); fetchData(viewStartMonth, viewEndMonth);
@@ -374,7 +405,7 @@
                 try {
                     const res = await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "cancelAgencyDelivery", rowIndex: cancelDeliveryTarget.rowIndex })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "cancelAgencyDelivery", rowIndex: cancelDeliveryTarget.rowIndex })
                     });
                     const data = await res.json();
                     if(data.status === 'error') showMessage("取消エラー: " + data.message);
@@ -389,7 +420,7 @@
                 try {
                     const res = await fetch(GAS_URL, {
                         method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "cancelAgencyInventory", rowIndex: cancelInventoryTarget.rowIndex })
+                        body: JSON.stringify({ adminKey: getAdminKey(), action: "cancelAgencyInventory", rowIndex: cancelInventoryTarget.rowIndex })
                     });
                     const data = await res.json();
                     if(data.status === 'error') showMessage("取消エラー: " + data.message);
@@ -397,6 +428,21 @@
                 } catch(e) { showMessage("通信エラーが発生しました。"); }
                 finally { setIsCancelling(false); setCancelInventoryTarget(null); }
             };
+
+            if (!adminKey) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen bg-gray-50 p-6">
+                        <form onSubmit={handleLogin} className="w-full max-w-[340px] bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center gap-2 mb-1"><div className="w-8 h-8 bg-nanairo-dark rounded-full flex items-center justify-center text-white"><Icons.ClipboardList className="w-4 h-4" /></div><h1 className="font-bold text-gray-800">なないろ菜 管理画面</h1></div>
+                            <p className="text-xs text-gray-500 mb-5">スタッフ用のパスワードを入力してください。この端末では次回から入力不要になります。</p>
+                            <label htmlFor="admin-pass" className="block text-xs font-bold text-gray-600 mb-1">パスワード</label>
+                            <input id="admin-pass" type="password" autoComplete="current-password" value={loginInput} onChange={e => setLoginInput(e.target.value)} className="block w-full border border-gray-300 rounded-lg p-3 text-base bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none mb-3" autoFocus />
+                            {loginError && <p role="alert" className="text-xs font-bold text-red-600 mb-3">{loginError}</p>}
+                            <button type="submit" disabled={!loginInput || isLoggingIn} className={`w-full rounded-xl py-3 font-bold text-white ${!loginInput || isLoggingIn ? 'bg-gray-300' : 'bg-nanairo-dark active:bg-green-700'}`}>{isLoggingIn ? '確認中…' : 'ログイン'}</button>
+                        </form>
+                    </div>
+                );
+            }
 
             if (isLoadingData) {
                 return (

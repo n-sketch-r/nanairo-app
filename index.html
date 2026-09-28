@@ -68,19 +68,19 @@
         const GAS_URL = "https://script.google.com/macros/s/AKfycbwv2XISbajDhH03WIIvr9-Br87CGaQcVYKtzk6flCluhncE6rfxlKS0fTN0vdbV5k-H9Q/exec"; 
 
         // ★将来再開できるように画像は残しておく
+        // ★商品写真（images/ フォルダ。1000px・約120KBに圧縮済み）
         const IMAGE_MAP = {
-            "アマランサス": "https://i.imgur.com/LCmD4Pd.jpeg",
-            "デトロイト": "https://i.imgur.com/YOWKgpT.jpeg",
-            "なないろ菜": "https://i.imgur.com/FlH5haw.jpeg",
-            "にんじん": "https://i.imgur.com/TtUZCjB.jpeg",
-            "ハーブミックス": "https://i.imgur.com/DwXHahe.jpeg",
-            "ひまわり": "https://i.imgur.com/TClqEi4.jpeg",
-            "ペッパークレス": "https://i.imgur.com/C2HhXX7.jpeg",
-            "マスタード": "https://i.imgur.com/3OsrLaG.jpeg",
-            "レッドケール": "https://i.imgur.com/1leRg6v.jpeg",
-            "レッドラディッシュ": "https://i.imgur.com/qLzbZzV.jpeg",
-            "ロケット": "https://i.imgur.com/qYRy12U.jpeg",
-            "青じそ": "https://i.imgur.com/IywcF1I.jpeg"
+            "アマランサス": "images/amaranth.jpg",
+            "デトロイト": "images/detroit.jpg",
+            "にんじん": "images/carrot.jpg",
+            "ハーブミックス": "images/herb-mix.jpg",
+            "ひまわり": "images/sunflower.jpg",
+            "ペッパークレス": "images/pepper-cress.jpg",
+            "マスタード": "images/mustard.jpg",
+            "レッドケール": "images/red-kale.jpg",
+            "レッドラディッシュ": "images/red-radish.jpg",
+            "ロケット": "images/rocket.jpg",
+            "青じそ": "images/aojiso.jpg"
         };
 
         // ★配送ルール（GAS側の DELIVERY と同じ値にしてください）
@@ -192,9 +192,8 @@
                                 liff.login();
                             } else {
                                 setUserName("プレビューゲスト");
-                                setUserId("guest_user_id");
+                                setUserId("");
                                 setIsLiffReady(true);
-                                fetchUserOrders("guest_user_id");
                             }
                         }
                     })
@@ -226,9 +225,21 @@
                     .finally(() => setIsLoadingData(false));
             };
 
+            // ★LINEの本人確認用トークン（GAS側でLINEのサーバーに照会して本人を確認します）
+            const getIdToken = () => {
+                try { return (window.liff && liff.isLoggedIn()) ? liff.getIDToken() : null; } catch (e) { return null; }
+            };
+
             const fetchUserOrders = (uid) => {
+                const idToken = getIdToken();
+                const fallbackId = uid || userId;
+                if (!idToken && !fallbackId) return;
                 setIsLoadingHistory(true);
-                fetch(`${GAS_URL}?action=getUserOrders&userId=${uid}`)
+                fetch(GAS_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ action: "getUserOrders", idToken, userId: fallbackId })
+                })
                     .then(res => res.json())
                     .then(data => {
                         if (Array.isArray(data)) {
@@ -301,6 +312,7 @@
                     action: "order", 
                     userName: userName,
                     userId: userId,
+                    idToken: getIdToken(),
                     orderItems: orderItemsString,
                     deliveryMethod: deliveryMethod,
                     pickupDate: isDelivery ? deliveryDate : pickupDate,
@@ -340,7 +352,7 @@
                         address: isDelivery ? city + addressDetail.trim() : "",
                         total: result.totalPrice ?? cartSummary.grandTotal
                     });
-                    if(userId) fetchUserOrders(userId);
+                    fetchUserOrders();
                     loadProducts();
 
                     setShowConfirm(false);
@@ -366,13 +378,14 @@
                         body: JSON.stringify({
                             action: "cancelOrder",
                             orderId: cancelTarget.id,
-                            userId: userId
+                            userId: userId,
+                            idToken: getIdToken()
                         })
                     });
                     const result = await res.json();
                     if (!result || result.status !== "success") {
                         alert((result && result.message ? String(result.message).replace(/^Error:\s*/, '') : "キャンセルできませんでした。") + "\nお手数ですが公式LINEまたはお電話でご連絡ください。");
-                        if (userId) fetchUserOrders(userId);
+                        fetchUserOrders();
                         return;
                     }
                     
@@ -444,7 +457,7 @@
                                                             </div>
                                                         )}
                                                         <div className="relative h-28 bg-gray-100">
-                                                            <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                                                            <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                                                         </div>
                                                         <div className="p-2 flex-1 flex flex-col">
                                                             <h4 className="text-sm font-bold text-gray-800 leading-tight mb-1 line-clamp-2">{product.name}</h4>
