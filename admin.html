@@ -32,6 +32,7 @@
     <style>
         ::-webkit-scrollbar { display: none; }
         body { background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+        @media (min-width: 1024px) { .app-container { max-width: 1120px !important; } }
         .app-container { max-width: 600px; margin: 0 auto; background-color: #f3f4f6; min-height: 100vh; position: relative; display: flex; flex-direction: column; }
         .spinner { border: 3px solid rgba(255,255,255,0.3); border-left-color: #fff; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
         .spinner-dark { border-color: rgba(0,0,0,0.1); border-left-color: #16a34a; }
@@ -100,6 +101,14 @@
         // ★画面に出さない商品（index.html の HIDDEN_PRODUCTS と同じにしてください）
         const HIDDEN_PRODUCTS = ["なないろ菜", "レッドソレル"];
 
+        // ★商品写真（注文画面と同じ images/ を使う）
+        const IMAGE_MAP = {
+            "アマランサス": "images/amaranth.jpg", "デトロイト": "images/detroit.jpg", "にんじん": "images/carrot.jpg",
+            "ハーブミックス": "images/herb-mix.jpg", "ひまわり": "images/sunflower.jpg", "ペッパークレス": "images/pepper-cress.jpg",
+            "マスタード": "images/mustard.jpg", "レッドケール": "images/red-kale.jpg", "レッドラディッシュ": "images/red-radish.jpg",
+            "ロケット": "images/rocket.jpg", "青じそ": "images/aojiso.jpg"
+        };
+
         const GAS_URL = "https://script.google.com/macros/s/AKfycbwv2XISbajDhH03WIIvr9-Br87CGaQcVYKtzk6flCluhncE6rfxlKS0fTN0vdbV5k-H9Q/exec"; 
 
         const toWareki = (dateStr) => {
@@ -138,6 +147,8 @@
             const [amount, setAmount] = useState(1);
             const [stockMemo, setStockMemo] = useState(''); 
             const [isSubmitting, setIsSubmitting] = useState(false);
+            const [stockSheetOpen, setStockSheetOpen] = useState(false); // 在庫の入力（下から出る画面）
+            const [selectedOrderId, setSelectedOrderId] = useState(null); // 詳細を開いている注文
             
             // モーダル・キャンセル関連
             const [showBulkLossModal, setShowBulkLossModal] = useState(false);
@@ -255,12 +266,9 @@
 
             const handleRefresh = () => fetchData(viewStartMonth, viewEndMonth);
 
-            const handleActionClick = (productId, actionType) => {
-                setSelectedProductId(productId); setType(actionType); setAmount(1); setStockMemo(''); 
-                setTimeout(() => {
-                    const formEl = document.getElementById('manual-input-form');
-                    if (formEl) window.scrollTo({ top: formEl.getBoundingClientRect().top + window.scrollY - 70, behavior: 'smooth' });
-                }, 50);
+            // 商品をタップ → 在庫の入力画面を開く
+            const openStockSheet = (productId) => {
+                setSelectedProductId(productId); setType('add'); setAmount(1); setStockMemo(''); setStockSheetOpen(true);
             };
 
             const handleSubmitStock = async () => {
@@ -268,8 +276,10 @@
                 setIsSubmitting(true);
                 try {
                     await postAdmin({ action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo });
-                    const actionName = type === 'add' ? '収穫(追加)' : type === 'sale' ? '店頭販売' : 'ロス(破棄)';
-                    showMessage(`${amount}件の「${actionName}」を記録しました！`);
+                    const actionName = type === 'add' ? '収穫' : type === 'sale' ? '店頭販売' : 'ロス';
+                    const pName = (products.find(x => x.id === selectedProductId) || {}).name || '';
+                    showMessage(`${pName}：${actionName} ${amount} を記録しました`);
+                    setStockSheetOpen(false);
                     fetchData(viewStartMonth, viewEndMonth); setAmount(1); setStockMemo(''); 
                 } catch(error) { showMessage("記録できませんでした: " + error.message, 6000); } 
                 finally { setIsSubmitting(false); }
@@ -639,69 +649,9 @@
                 );
             };
 
-            const renderOrdersTab = () => {
-                const isCurrentMonth = viewStartMonth === todayMonth;
-                const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了')
-                    .sort((a, b) => (a.pickupDate + a.pickupTime).localeCompare(b.pickupDate + b.pickupTime));
-                const pastOrders = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o));
-                // 配送日ごとのルート（今日以降・未配達の配送のみ）。出発地は現在地、市町村ごとにまとめて並べる
-                const AREA_ORDER = ["鶴岡市", "三川町", "庄内町", "酒田市", "遊佐町"];
-                const areaRank = (addr) => { const i = AREA_ORDER.findIndex(a => String(addr).startsWith(a)); return i < 0 ? 99 : i; };
-                const routeByDate = {};
-                activeOrders.filter(o => o.deliveryMethod === '配送' && o.address && o.pickupDate >= todayStr).forEach(o => {
-                    (routeByDate[o.pickupDate] = routeByDate[o.pickupDate] || []).push(o);
-                });
-                const deliveryRoutes = Object.keys(routeByDate).sort().map(date => {
-                    const stops = [...new Set(routeByDate[date]
-                        .sort((a, b) => areaRank(a.address) - areaRank(b.address) || a.address.localeCompare(b.address, 'ja'))
-                        .map(o => '山形県' + o.address))];
-                    const dest = stops[stops.length - 1];
-                    const waypoints = stops.slice(0, -1);
-                    const url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest)
-                        + (waypoints.length ? '&waypoints=' + encodeURIComponent(waypoints.join('|')) : '');
-                    const [, m, d] = date.split('-').map(Number);
-                    const label = date === todayStr ? `今日（${m}/${d}）` : `${m}/${d}（${'日月火水木金土'[new Date(date + 'T00:00:00+09:00').getDay()]}）`;
-                    return { date, url, label, count: routeByDate[date].length };
-                });
-
-                return (
-                    <div className="animate-slide-up space-y-5 relative z-10">
-                        <div className="flex flex-col gap-3 mb-4">
-                            <div className="flex justify-between items-center">
-                                <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm w-fit">
-                                    <Icons.Calendar className="w-4 h-4 text-gray-500" />
-                                    <input type="month" value={viewStartMonth} onChange={(e) => setViewStartMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
-                                    <span className="text-gray-400 font-bold">〜</span>
-                                    <input type="month" value={viewEndMonth} onChange={(e) => setViewEndMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
-                                </div>
-                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
-                            </div>
-                            <div className="flex gap-2">
-                                <button type="button" onClick={() => openBulkPrintPreview('invoice')} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-bold text-gray-700 shadow-sm active:bg-gray-50 flex justify-center items-center gap-2"><Icons.FileText className="w-4 h-4 text-blue-500"/> 納品書 一括出力</button>
-                                <button type="button" onClick={() => openBulkPrintPreview('receipt')} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-bold text-gray-700 shadow-sm active:bg-gray-50 flex justify-center items-center gap-2"><Icons.FileText className="w-4 h-4 text-green-500"/> 領収書 一括出力</button>
-                            </div>
-                        </div>
-
-                        {isCurrentMonth && (
-                            <>
-                                <div className="flex justify-between items-end border-l-4 border-nanairo-dark pl-2">
-                                    <h1 className="text-xl font-bold text-gray-800">注文対応</h1>
-                                    <span className="text-sm font-bold text-nanairo-dark bg-nanairo-light px-2 py-1 rounded">未対応: {activeOrders.filter(o=>o.status==='未対応').length}件</span>
-                                </div>
-                                {/* ★配送ルート：配送日ごとに、Googleマップで配送先を順番に回る道案内を開く */}
-                                {deliveryRoutes.length > 0 && (
-                                    <div className="flex flex-col gap-2">
-                                        {deliveryRoutes.map(r => (
-                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-nanairo-dark text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm active:bg-blue-700">
-                                                <span className="flex items-center gap-2"><Icons.MapPin className="w-5 h-5" />{r.label} の配送ルートを開く</span>
-                                                <span className="text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">{r.count}件</span>
-                                            </a>
-                                        ))}
-                                    </div>
-                                )}
-                                <div className="space-y-4">
-                                    {activeOrders.map(order => (
-                                        <div key={order.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
+            // 注文の詳細カード（スマホでは下から、iPad・PCでは右側に表示）
+            const renderOrderCard = (order) => (
+                                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
                                             <div className={`px-4 py-2 flex justify-between items-center font-bold text-sm ${order.status === '未対応' ? 'bg-amber-50 text-amber-800 border-b border-amber-200' : 'bg-nanairo-light text-nanairo-dark border-b border-green-200'}`}>
                                                 <div className="flex items-center gap-1">{order.status === '未対応' ? <Icons.Clock className="w-4 h-4"/> : <Icons.Check className="w-4 h-4"/>}{order.status}</div>
                                                 <span className="text-xs font-normal opacity-90">注文: {order.orderDate}</span>
@@ -755,13 +705,115 @@
                                                         <button type="button" onClick={() => openPrintPreview(order, 'invoice')} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg text-[11px] font-bold text-gray-600 active:bg-gray-100 flex items-center justify-center gap-1 h-10 shadow-sm"><Icons.FileText className="w-3.5 h-3.5"/>納品書</button>
                                                         <button type="button" onClick={() => openPrintPreview(order, 'receipt')} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg text-[11px] font-bold text-gray-600 active:bg-gray-100 flex items-center justify-center gap-1 h-10 shadow-sm"><Icons.FileText className="w-3.5 h-3.5"/>領収書</button>
                                                     </div>
-                                                    <button type="button" onClick={() => toggleOrderStatus(order.id, order.status)} className={`flex-[1.5] h-10 rounded-lg font-bold text-sm transition-colors shadow-sm ${order.status === '未対応' ? 'bg-nanairo-light text-nanairo-dark border border-nanairo hover:bg-green-100' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>{order.status === '未対応' ? '準備完了にする' : (order.deliveryMethod === '配送' ? '配達済にする' : '受渡済にする')}</button>
+                                                    <button type="button" onClick={() => { toggleOrderStatus(order.id, order.status); setSelectedOrderId(null); }} className={`flex-[1.5] h-10 rounded-lg font-bold text-sm transition-colors shadow-sm ${order.status === '未対応' ? 'bg-nanairo-light text-nanairo-dark border border-nanairo hover:bg-green-100' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>{order.status === '未対応' ? '準備完了にする' : (order.deliveryMethod === '配送' ? '配達済にする' : '受渡済にする')}</button>
                                                 </div>
                                             </div>
                                         </div>
-                                    ))}
-                                    {activeOrders.length === 0 && <div className="text-center py-10 bg-white rounded-xl border border-gray-200 text-gray-500">現在、未対応の注文はありません。</div>}
+            );
+
+            const renderOrdersTab = () => {
+                const isCurrentMonth = viewStartMonth === todayMonth;
+                const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了')
+                    .sort((a, b) => (a.pickupDate + a.pickupTime).localeCompare(b.pickupDate + b.pickupTime));
+                const pastOrders = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o));
+                // 配送日ごとのルート（今日以降・未配達の配送のみ）。出発地は現在地、市町村ごとにまとめて並べる
+                const AREA_ORDER = ["鶴岡市", "三川町", "庄内町", "酒田市", "遊佐町"];
+                const areaRank = (addr) => { const i = AREA_ORDER.findIndex(a => String(addr).startsWith(a)); return i < 0 ? 99 : i; };
+                const routeByDate = {};
+                activeOrders.filter(o => o.deliveryMethod === '配送' && o.address && o.pickupDate >= todayStr).forEach(o => {
+                    (routeByDate[o.pickupDate] = routeByDate[o.pickupDate] || []).push(o);
+                });
+                const deliveryRoutes = Object.keys(routeByDate).sort().map(date => {
+                    const stops = [...new Set(routeByDate[date]
+                        .sort((a, b) => areaRank(a.address) - areaRank(b.address) || a.address.localeCompare(b.address, 'ja'))
+                        .map(o => '山形県' + o.address))];
+                    const dest = stops[stops.length - 1];
+                    const waypoints = stops.slice(0, -1);
+                    const url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest)
+                        + (waypoints.length ? '&waypoints=' + encodeURIComponent(waypoints.join('|')) : '');
+                    const [, m, d] = date.split('-').map(Number);
+                    const label = date === todayStr ? `今日（${m}/${d}）` : `${m}/${d}（${'日月火水木金土'[new Date(date + 'T00:00:00+09:00').getDay()]}）`;
+                    return { date, url, label, count: routeByDate[date].length };
+                });
+
+                const selectedOrder = orders.find(o => o.id === selectedOrderId);
+                return (
+                    <div className="lg:flex lg:gap-6 lg:items-start">
+                    <div className="animate-slide-up space-y-5 relative z-10 lg:w-[440px] lg:shrink-0">
+                        <div className="flex flex-col gap-3 mb-4">
+                            <div className="flex justify-between items-center">
+                                <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm w-fit">
+                                    <Icons.Calendar className="w-4 h-4 text-gray-500" />
+                                    <input type="month" value={viewStartMonth} onChange={(e) => setViewStartMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
+                                    <span className="text-gray-400 font-bold">〜</span>
+                                    <input type="month" value={viewEndMonth} onChange={(e) => setViewEndMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
                                 </div>
+                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
+                            </div>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => openBulkPrintPreview('invoice')} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-bold text-gray-700 shadow-sm active:bg-gray-50 flex justify-center items-center gap-2"><Icons.FileText className="w-4 h-4 text-blue-500"/> 納品書 一括出力</button>
+                                <button type="button" onClick={() => openBulkPrintPreview('receipt')} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-bold text-gray-700 shadow-sm active:bg-gray-50 flex justify-center items-center gap-2"><Icons.FileText className="w-4 h-4 text-green-500"/> 領収書 一括出力</button>
+                            </div>
+                        </div>
+
+                        {isCurrentMonth && (
+                            <>
+                                <div className="flex justify-between items-end border-l-4 border-nanairo-dark pl-2">
+                                    <h1 className="text-xl font-bold text-gray-800">注文対応</h1>
+                                    <span className="text-sm font-bold text-nanairo-dark bg-nanairo-light px-2 py-1 rounded">未対応: {activeOrders.filter(o=>o.status==='未対応').length}件</span>
+                                </div>
+                                {/* ★配送ルート：配送日ごとに、Googleマップで配送先を順番に回る道案内を開く */}
+                                {deliveryRoutes.length > 0 && (
+                                    <div className="flex flex-col gap-2">
+                                        {deliveryRoutes.map(r => (
+                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-nanairo-dark text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm active:bg-blue-700">
+                                                <span className="flex items-center gap-2"><Icons.MapPin className="w-5 h-5" />{r.label} の配送ルートを開く</span>
+                                                <span className="text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">{r.count}件</span>
+                                            </a>
+                                        ))}
+                                    </div>
+                                )}
+                                {(() => {
+                                    // 受取日（配送日）で「日付を過ぎた・今日・明日・それ以降」に分ける（一覧は1つのまま）
+                                    const groups = [
+                                        { key: 'late', label: '日付を過ぎた注文', badge: 'bg-gray-700', list: activeOrders.filter(o => o.pickupDate < todayStr) },
+                                        { key: 'today', label: '今日', badge: 'bg-red-500', list: activeOrders.filter(o => o.pickupDate === todayStr) },
+                                        { key: 'tomorrow', label: '明日', badge: 'bg-orange-400', list: activeOrders.filter(o => o.pickupDate === tomorrowStr) },
+                                        { key: 'later', label: 'それ以降', badge: 'bg-gray-400', list: activeOrders.filter(o => o.pickupDate > tomorrowStr) },
+                                    ];
+                                    if (activeOrders.length === 0) return <div className="text-center py-10 bg-white rounded-xl border border-gray-200 text-gray-500">現在、対応が必要な注文はありません。</div>;
+                                    return groups.filter(g => g.list.length > 0 || g.key === 'today').map(g => (
+                                        <div key={g.key}>
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <span className={`text-xs font-bold text-white px-2 py-0.5 rounded ${g.badge}`}>{g.label}</span>
+                                                <span className="text-sm font-bold text-gray-700">{g.key === 'today' ? fmtWhen(todayStr, '').trim() : g.key === 'tomorrow' ? fmtWhen(tomorrowStr, '').trim() : ''}　{g.list.length}件</span>
+                                            </div>
+                                            {g.list.length > 0 && (
+                                                <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                                                    {g.list.map(o => {
+                                                        const isDeliv = o.deliveryMethod === '配送';
+                                                        const [, m, d] = o.pickupDate.split('-').map(Number);
+                                                        const selected = selectedOrderId === o.id;
+                                                        return (
+                                                            <button key={o.id} type="button" onClick={() => setSelectedOrderId(o.id)} className={`w-full text-left p-3 flex items-center gap-3 active:bg-gray-50 ${selected ? 'bg-nanairo-light' : ''}`}>
+                                                                <div className="text-center w-12 shrink-0">
+                                                                    <div className={`text-xs font-bold ${isDeliv ? 'text-blue-600' : 'text-gray-500'}`}>{isDeliv ? '配送' : '店頭'}</div>
+                                                                    <div className="text-sm font-bold text-gray-900">{g.key === 'later' || g.key === 'late' ? `${m}/${d}` : String(o.pickupTime).split('-')[0]}</div>
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="font-bold text-gray-900 truncate">{o.storeName || o.userName}</div>
+                                                                    <div className="text-xs text-gray-500 truncate">{(o.itemsList || []).map(i => `${i.name}×${i.qty}`).join('、')}　¥{Number(o.totalPrice || 0).toLocaleString()}</div>
+                                                                </div>
+                                                                <span className={`text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap ${o.status === '未対応' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-nanairo-dark'}`}>{o.status}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ));
+                                })()}
+                                <p className="text-xs text-gray-500">行をタップすると、住所・電話・確認チェック・印刷などの詳細が開きます。</p>
                             </>
                         )}
                         <div className={isCurrentMonth ? "pt-4 border-t border-gray-200" : ""}>
@@ -802,79 +854,46 @@
                             )}
                         </div>
                     </div>
+                    {/* iPad・PC：右側に詳細 */}
+                    <aside className="hidden lg:block flex-1 sticky top-20">
+                        {selectedOrder ? renderOrderCard(selectedOrder) : (
+                            <div className="bg-white rounded-xl border border-dashed border-gray-300 p-10 text-center text-gray-400">
+                                <img src="images/logo.png" alt="" className="w-20 h-20 object-contain mx-auto opacity-60" />
+                                <p className="mt-2 text-sm">左の一覧から注文を選ぶと、ここに詳細が出ます</p>
+                            </div>
+                        )}
+                    </aside>
+                    </div>
                 );
             };
 
             const renderInventoryTab = () => (
                 <div className="animate-slide-up space-y-6 relative z-10">
                     <div className="flex justify-between items-end border-l-4 border-nanairo-dark pl-2">
-                        <h1 className="text-xl font-bold text-gray-800">在庫・店頭販売</h1>
+                        <h1 className="text-xl font-bold text-gray-800">在庫</h1>
                         <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
                     </div>
 
-                    <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-4">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-50 border-b border-gray-200">
-                                <tr><th className="px-3 py-3 font-bold text-gray-600">商品名</th><th className="px-2 py-3 font-bold text-gray-600 text-center">在庫</th><th className="px-3 py-3 font-bold text-gray-600 text-right">調整</th></tr>
-                            </thead>
-                            <tbody>
-                                {products.map(p => (
-                                    <tr key={p.id} className="border-b border-gray-100 last:border-0">
-                                        <td className="px-3 py-3 font-bold text-gray-800 whitespace-nowrap">{p.name}{p.weight && <span className="block text-[10px] text-gray-500 font-normal">{p.weight}</span>}</td>
-                                        <td className="px-2 py-3 text-center"><span className={`font-bold px-2 py-1 rounded-md text-xs ${p.stock <= 5 ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'}`}>{p.stock} P</span></td>
-                                        <td className="px-3 py-3 text-right">
-                                            <div className="flex justify-end gap-1 flex-wrap w-full">
-                                                <button type="button" onClick={() => handleActionClick(p.id, 'add')} className="bg-nanairo-dark text-white px-2 py-1.5 rounded text-[10px] font-bold active:bg-green-700">収穫</button>
-                                                <button type="button" onClick={() => handleActionClick(p.id, 'sale')} className="bg-blue-500 text-white px-2 py-1.5 rounded text-[10px] font-bold active:bg-blue-600">販売</button>
-                                                <button type="button" onClick={() => handleActionClick(p.id, 'remove')} className="bg-red-500 text-white px-2 py-1.5 rounded text-[10px] font-bold active:bg-red-600">ロス</button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                    <p className="text-xs text-gray-500 -mt-3">商品をタップして、収穫・販売・ロスを記録します。</p>
+                    <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {products.map(p => (
+                            <button key={p.id} type="button" onClick={() => openStockSheet(p.id)} className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left active:scale-[0.98] transition-transform shadow-sm">
+                                {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
+                                <div className="p-2 flex items-end justify-between gap-1">
+                                    <div className="min-w-0"><div className="font-bold text-sm text-gray-900 truncate">{p.name}</div><div className="text-xs text-gray-500">{p.weight}</div></div>
+                                    <span className={`text-2xl font-bold leading-none ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500' : 'text-gray-900'}`}>{p.stock}</span>
+                                </div>
+                            </button>
+                        ))}
                     </section>
 
-                    <button type="button" onClick={() => setShowBulkLossModal(true)} className="w-full bg-red-50 text-red-600 border border-red-200 rounded-xl py-3 font-bold text-sm mb-6 active:bg-red-100 flex justify-center items-center gap-2 shadow-sm">
-                        <Icons.AlertTriangle className="w-4 h-4"/> 現在の全在庫を一括でロス (破棄) する
+                    <button type="button" onClick={() => setShowBulkLossModal(true)} className="w-full bg-white text-red-600 border border-red-200 rounded-xl py-3 font-bold text-sm active:bg-red-50 flex justify-center items-center gap-2">
+                        <Icons.AlertTriangle className="w-4 h-4"/> 今ある在庫をすべてロスにする
                     </button>
 
-                    <section id="manual-input-form" className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
-                        <h2 className="font-bold text-gray-800 mb-4 text-base">手動入力フォーム</h2>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1">商品を選択</label>
-                                <select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} className="w-full border border-gray-300 rounded-lg p-3 text-sm bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none"><option value="">選択してください</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1">区分</label>
-                                <div className="flex items-center bg-gray-100 border border-gray-200 rounded-xl h-11 p-1 relative cursor-pointer select-none">
-                                    <div onClick={() => setType('add')} className={`w-1/3 h-full rounded-lg flex items-center justify-center text-xs font-bold z-10 transition-colors ${type === 'add' ? 'text-white' : 'text-gray-500'}`}>収穫 (追加)</div>
-                                    <div onClick={() => setType('sale')} className={`w-1/3 h-full rounded-lg flex items-center justify-center text-xs font-bold z-10 transition-colors ${type === 'sale' ? 'text-white' : 'text-gray-500'}`}>店頭販売</div>
-                                    <div onClick={() => setType('remove')} className={`w-1/3 h-full rounded-lg flex items-center justify-center text-xs font-bold z-10 transition-colors ${type === 'remove' ? 'text-white' : 'text-gray-500'}`}>ロス (破棄)</div>
-                                    <div className={`absolute top-1 bottom-1 w-[calc(33.333%-4px)] rounded-lg shadow-sm transition-transform duration-300 ${type === 'add' ? 'bg-nanairo-dark left-1 translate-x-0' : type === 'sale' ? 'bg-blue-500 left-1 translate-x-full' : 'bg-red-500 left-1 translate-x-[200%]'}`}></div>
-                                </div>
-                            </div>
-                            <div className="w-24">
-                                <label className="block text-xs font-bold text-gray-500 mb-1">数量</label>
-                                <div className="flex items-center border border-gray-300 rounded-xl bg-gray-50 h-11 overflow-hidden">
-                                    <button type="button" onClick={() => setAmount(Math.max(1, amount - 1))} className="w-8 h-full flex justify-center items-center text-gray-600 bg-gray-100"><Icons.Minus className="w-3 h-3" /></button>
-                                    <div className="flex-1 text-center font-bold text-sm">{amount}</div>
-                                    <button type="button" onClick={() => setAmount(amount + 1)} className="w-8 h-full flex justify-center items-center text-gray-600 bg-gray-100"><Icons.Plus className="w-3 h-3" /></button>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1">メモ (オプション)</label>
-                                <textarea value={stockMemo} onChange={e => setStockMemo(e.target.value)} placeholder="例：鮮度落ち、店頭での現金販売など" className="w-full border border-gray-300 rounded-lg p-3 text-sm bg-gray-50 h-16 resize-none focus:ring-2 focus:ring-nanairo-dark outline-none"></textarea>
-                            </div>
-                            <button type="button" onClick={handleSubmitStock} disabled={isSubmitting || !selectedProductId} className={`w-full py-3.5 rounded-xl font-bold shadow-md transition-colors flex justify-center items-center gap-2 mt-2 ${(!selectedProductId || isSubmitting) ? 'bg-gray-300 text-gray-500' : type === 'add' ? 'bg-nanairo-dark text-white' : type === 'sale' ? 'bg-blue-600 text-white' : 'bg-red-500 text-white'}`}>
-                                {isSubmitting ? <><div className="spinner"></div> 登録中...</> : '入力'}
-                            </button>
-                        </div>
-                    </section>
 
                     <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
-                        <h2 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2"><Icons.History className="w-4 h-4 text-gray-500" /> 最近の調整履歴</h2>
+                        <h2 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2"><Icons.History className="w-4 h-4 text-gray-500" /> 最近の記録</h2>
                         <div className="space-y-2">
                             {stockLogs.length === 0 ? <p className="text-xs text-gray-500 text-center py-4">履歴はありません</p> : (
                                 stockLogs.map((log) => {
@@ -1402,6 +1421,11 @@
                                 <span className="font-bold text-nanairo-dark">マイクロハーブ</span>
                                 <span className="text-[10px] font-bold text-white bg-nanairo-dark px-1.5 py-0.5 rounded">管理</span>
                             </div>
+                            <nav className="hidden lg:flex gap-1 text-sm font-bold">
+                                {[['orders', '注文'], ['inventory', '在庫'], ['agency', '委託'], ['analytics', '分析・請求']].map(([k, label]) => (
+                                    <button key={k} type="button" onClick={() => setActiveTab(k)} className={`px-4 py-1.5 rounded-lg ${activeTab === k ? 'bg-nanairo-light text-nanairo-dark' : 'text-gray-500 hover:bg-gray-100'}`}>{label}</button>
+                                ))}
+                            </nav>
                         </div>
                         <div className="rainbow"></div>
                     </header>
@@ -1413,19 +1437,71 @@
                         </div>
                     )}
 
-                    <main className="no-print flex-1 px-4 pt-4 pb-[120px] relative z-0">
+                    <main className="no-print flex-1 px-4 pt-4 pb-[120px] lg:pb-10 relative z-0">
                         {activeTab === 'orders' && renderOrdersTab()}
                         {activeTab === 'inventory' && renderInventoryTab()}
                         {activeTab === 'agency' && renderAgencyTab()}
                         {activeTab === 'analytics' && renderAnalyticsTab()}
                     </main>
 
+                    {stockSheetOpen && (() => {
+                        const p = products.find(x => x.id === selectedProductId);
+                        if (!p) return null;
+                        const TYPES = [['add', '🌱 収穫', 'bg-nanairo-dark'], ['sale', '🛒 販売', 'bg-blue-600'], ['remove', '🗑 ロス', 'bg-red-500']];
+                        const cur = TYPES.find(t => t[0] === type);
+                        const after = type === 'add' ? p.stock + amount : p.stock - amount;
+                        return (
+                            <div className="fixed inset-0 bg-black/40 z-[60] flex flex-col justify-end items-center" onClick={() => !isSubmitting && setStockSheetOpen(false)}>
+                                <div className="bg-white rounded-t-3xl w-full max-w-[600px] p-4 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+                                    <div className="flex items-center gap-3">
+                                        {IMAGE_MAP[p.name] && <img src={IMAGE_MAP[p.name]} alt="" className="w-12 h-12 rounded-lg object-cover" />}
+                                        <div className="flex-1"><b className="text-gray-900">{p.name}</b><div className="text-xs text-gray-500">いまの在庫 {p.stock}</div></div>
+                                        <button type="button" onClick={() => setStockSheetOpen(false)} className="p-1.5 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-1 bg-gray-100 rounded-xl p-1 mt-3 text-sm font-bold">
+                                        {TYPES.map(([k, label, bg]) => (
+                                            <button key={k} type="button" onClick={() => setType(k)} className={`rounded-lg py-2.5 ${type === k ? `${bg} text-white shadow-sm` : 'text-gray-600'}`}>{label}</button>
+                                        ))}
+                                    </div>
+                                    <div className="flex items-center justify-between mt-4 px-2">
+                                        <button type="button" onClick={() => setAmount(Math.max(1, amount - 1))} className="w-14 h-14 rounded-full border border-gray-300 flex items-center justify-center text-gray-600"><Icons.Minus className="w-6 h-6" /></button>
+                                        <input type="number" inputMode="numeric" min="1" value={amount} onChange={e => setAmount(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-28 text-center text-5xl font-bold text-gray-900 outline-none bg-transparent" />
+                                        <button type="button" onClick={() => setAmount(amount + 1)} className="w-14 h-14 rounded-full bg-nanairo-dark flex items-center justify-center text-white"><Icons.Plus className="w-6 h-6" /></button>
+                                    </div>
+                                    <div className="flex gap-2 justify-center mt-3">
+                                        {[5, 10, 20].map(n => <button key={n} type="button" onClick={() => setAmount(amount + n)} className="px-4 py-1.5 rounded-full bg-gray-100 text-sm font-bold text-gray-700 active:bg-gray-200">+{n}</button>)}
+                                        <button type="button" onClick={() => setAmount(1)} className="px-4 py-1.5 rounded-full text-sm font-bold text-gray-400">1に戻す</button>
+                                    </div>
+                                    <input type="text" value={stockMemo} onChange={e => setStockMemo(e.target.value)} placeholder="メモ（任意）例：鮮度落ち" className="w-full mt-3 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 outline-none focus:ring-2 focus:ring-nanairo-dark" />
+                                    {after < 0 && <p className="text-xs font-bold text-red-600 mt-2">在庫（{p.stock}）より多い数です。数を確認してください。</p>}
+                                    <button type="button" onClick={handleSubmitStock} disabled={isSubmitting || after < 0} className={`w-full mt-3 rounded-xl py-3.5 text-white font-bold flex justify-center items-center gap-2 ${isSubmitting || after < 0 ? 'bg-gray-300' : cur[2]}`}>
+                                        {isSubmitting ? <><div className="spinner"></div> 記録中...</> : `${cur[1].slice(2)} ${amount} を記録（在庫 ${p.stock} → ${after}）`}
+                                    </button>
+                                    <p className="text-xs text-center text-gray-500 mt-2">間違えたときは、下の「最近の記録」から取り消せます</p>
+                                </div>
+                            </div>
+                        );
+                    })()}
+                    {(() => { const selectedOrder = orders.find(o => o.id === selectedOrderId); return (<>
+                    {/* スマホ：下から詳細 */}
+                    {selectedOrder && activeTab === 'orders' && (
+                        <div className="lg:hidden fixed inset-0 bg-black/50 z-[60] flex flex-col justify-end" onClick={() => setSelectedOrderId(null)}>
+                            <div className="bg-gray-50 rounded-t-3xl max-h-[90vh] overflow-y-auto p-3 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+                                <div className="flex justify-between items-center mb-2 px-1">
+                                    <span className="font-bold text-gray-700">注文の詳細</span>
+                                    <button type="button" onClick={() => setSelectedOrderId(null)} className="p-1.5 bg-white rounded-full shadow-sm"><Icons.X className="w-5 h-5" /></button>
+                                </div>
+                                {renderOrderCard(selectedOrder)}
+                            </div>
+                        </div>
+                    )}
+                    </>); })()}
                     {renderPrintView()}
                     {renderCustomerModal()}
                     {renderAllProductsModal()}
                     {renderAllCustomersModal()}
 
-                    <div className="no-print fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[600px] bg-white border-t border-gray-200 flex h-[76px] z-40 pb-[env(safe-area-inset-bottom)] box-border">
+                    <div className="no-print lg:hidden fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[600px] bg-white border-t border-gray-200 flex h-[76px] z-40 pb-[env(safe-area-inset-bottom)] box-border">
                         <button type="button" onClick={() => setActiveTab('orders')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'orders' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
                             <div className="relative">
                                 <Icons.ClipboardList className="w-6 h-6" />
@@ -1433,11 +1509,11 @@
                                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
                                 )}
                             </div>
-                            <span className="text-[11px] font-bold">注文対応</span>
+                            <span className="text-[11px] font-bold">注文</span>
                         </button>
                         <button type="button" onClick={() => setActiveTab('inventory')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'inventory' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
                             <Icons.Box className="w-6 h-6" />
-                            <span className="text-[11px] font-bold">在庫・販売</span>
+                            <span className="text-[11px] font-bold">在庫</span>
                         </button>
                         <button type="button" onClick={() => setActiveTab('agency')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'agency' ? 'text-agency' : 'text-gray-400'}`}>
                             <div className="relative">
@@ -1446,11 +1522,11 @@
                                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-agency rounded-full border-2 border-white"></div>
                                 )}
                             </div>
-                            <span className="text-[11px] font-bold">委託(卸し)</span>
+                            <span className="text-[11px] font-bold">委託</span>
                         </button>
                         <button type="button" onClick={() => setActiveTab('analytics')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'analytics' ? 'text-blue-600' : 'text-gray-400'}`}>
                             <Icons.TrendingUp className="w-6 h-6" />
-                            <span className="text-[11px] font-bold">分析</span>
+                            <span className="text-[11px] font-bold">分析・請求</span>
                         </button>
                     </div>
 
