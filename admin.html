@@ -342,6 +342,14 @@
             const dayBadge = (date) => date === todayStr ? <span className="ml-1 shrink-0 whitespace-nowrap text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded">今日</span>
                 : date === tomorrowStr ? <span className="ml-1 shrink-0 whitespace-nowrap text-[10px] font-bold bg-orange-400 text-white px-1.5 py-0.5 rounded">明日</span> : null;
 
+            // "2026-09-28" + "16:00-17:00" → "9/28(月) 16:00〜17:00"
+            const fmtWhen = (date, time) => {
+                const [y, m, d] = String(date || '').split('-').map(Number);
+                if (!m) return `${date || ''} ${time || ''}`;
+                const wd = '日月火水木金土'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+                return `${m}/${d}(${wd}) ${String(time || '').replace('-', '〜')}`;
+            };
+
             const openBulkPrintPreview = (type) => {
                 const printableOrders = orders.filter(o => o.status !== 'キャンセル' && inViewPeriod(o));
                 if(printableOrders.length === 0) return showMessage("指定期間に印刷可能な注文がありません。");
@@ -633,7 +641,8 @@
 
             const renderOrdersTab = () => {
                 const isCurrentMonth = viewStartMonth === todayMonth;
-                const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了') || [];
+                const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了')
+                    .sort((a, b) => (a.pickupDate + a.pickupTime).localeCompare(b.pickupDate + b.pickupTime));
                 const pastOrders = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o));
                 // 配送日ごとのルート（今日以降・未配達の配送のみ）。出発地は現在地、市町村ごとにまとめて並べる
                 const AREA_ORDER = ["鶴岡市", "三川町", "庄内町", "酒田市", "遊佐町"];
@@ -693,7 +702,7 @@
                                 <div className="space-y-4">
                                     {activeOrders.map(order => (
                                         <div key={order.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
-                                            <div className={`px-4 py-2 flex justify-between items-center text-white font-bold text-sm ${order.status === '未対応' ? 'bg-red-500' : 'bg-nanairo-dark'}`}>
+                                            <div className={`px-4 py-2 flex justify-between items-center font-bold text-sm ${order.status === '未対応' ? 'bg-amber-50 text-amber-800 border-b border-amber-200' : 'bg-nanairo-light text-nanairo-dark border-b border-green-200'}`}>
                                                 <div className="flex items-center gap-1">{order.status === '未対応' ? <Icons.Clock className="w-4 h-4"/> : <Icons.Check className="w-4 h-4"/>}{order.status}</div>
                                                 <span className="text-xs font-normal opacity-90">注文: {order.orderDate}</span>
                                             </div>
@@ -702,13 +711,13 @@
                                                     <div>
                                                         <div className="font-bold text-gray-800 text-lg flex items-center gap-2">{order.storeName ? <>{order.storeName}<span className="text-xs font-normal text-gray-500">（{order.userName} 様）</span></> : <>{order.userName} 様</>}</div>
                                                         {order.deliveryMethod === '配送' ? (
-                                                            <div className="text-sm text-blue-600 font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {order.pickupDate} {order.pickupTime}{dayBadge(order.pickupDate)}</div>
+                                                            <div className="text-sm text-blue-600 font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {fmtWhen(order.pickupDate, order.pickupTime)}{dayBadge(order.pickupDate)}</div>
                                                         ) : (
-                                                            <div className="text-sm text-nanairo-dark font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 店頭受取: {order.pickupDate} {order.pickupTime}{dayBadge(order.pickupDate)}</div>
+                                                            <div className="text-sm text-nanairo-dark font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 店頭受取: {fmtWhen(order.pickupDate, order.pickupTime)}{dayBadge(order.pickupDate)}</div>
                                                         )}
                                                     </div>
                                                     <div className="text-right">
-                                                        <div className="text-sm text-gray-500 mb-0.5">合計金額</div>
+                                                        <div className="text-sm text-gray-500 mb-0.5 whitespace-nowrap">合計金額</div>
                                                         <div className="font-bold text-xl text-gray-900">¥{Number(order.totalPrice || 0).toLocaleString()}</div>
                                                         {order.deliveryMethod === '配送' && <div className="text-[10px] text-gray-500">{order.shippingFee > 0 ? `送料¥${order.shippingFee}込` : '送料無料'}</div>}
                                                     </div>
