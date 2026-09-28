@@ -111,6 +111,17 @@
             "青じそ": "爽やかな香り"
         };
 
+        // ★特定商取引法に基づく表記（ready を true にすると注文画面の下にリンクが出る）
+        const LEGAL = {
+            ready: false,
+            seller: "株式会社N-SKETCH",
+            manager: "",                 // 運営責任者（要確認）
+            address: "〒997-0018 山形県鶴岡市茅原町26-23",
+            tel: "0235-26-0759",
+            hours: "",                   // 電話の受付時間（要確認）
+            returns: "",                 // 返品・交換（要確認）
+        };
+
         // この数以下で「残りわずか」と表示する
         const LOW_STOCK = 2;
 
@@ -213,6 +224,7 @@
             const [detailProduct, setDetailProduct] = useState(null); // 商品の詳しい画面
             const [loadError, setLoadError] = useState(false);        // 商品一覧が読み込めなかった
             const [bumpKey, setBumpKey] = useState(0);                // カートのボタンを弾ませる合図
+            const [showLegal, setShowLegal] = useState(false);
             const [showGuide, setShowGuide] = useState(() => { try { return !localStorage.getItem('nanairo_guide_seen'); } catch (e) { return false; } });
             const closeGuide = () => { setShowGuide(false); try { localStorage.setItem('nanairo_guide_seen', '1'); } catch (e) {} };
 
@@ -301,7 +313,7 @@
                                     ...p,
                                     desc: p.desc || PRODUCT_DESC[p.name] || '',
                                     unit: 'P',
-                                    image: IMAGE_MAP[p.name] || null // 写真がない商品は商品名を表示
+                                    image: p.imageUrl || IMAGE_MAP[p.name] || null // 管理画面で登録した写真 → images/ の写真 → なければ商品名
                                 }));
                             setProductsData(formattedData);
                         }
@@ -444,7 +456,7 @@
                 const newCart = {};
                 if (Array.isArray(itemsList)) {
                     itemsList.forEach(item => {
-                        const product = productsData.find(p => p.name === item.name);
+                        const product = productsData.find(p => item.id && p.id === item.id) || productsData.find(p => p.name === item.name); // 商品IDで探す（名前が変わっても再注文できる）
                         // もし過去履歴になないろ菜があった場合、現在販売してないのでカートには入らない仕様になります
                         if (product) newCart[product.id] = item.qty;
                     });
@@ -650,6 +662,7 @@
                                         </div>
                                     )}
                                 </section>
+                                {LEGAL.ready && <button type="button" onClick={() => setShowLegal(true)} className="block mx-auto text-[11px] text-stone-400 underline pb-24">特定商取引法に基づく表記・個人情報の取り扱い</button>}
                             </>
                         ) : (
                             <div className="pb-20">
@@ -951,6 +964,34 @@
                                         )}
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showLegal && (
+                        <div className="fixed inset-0 z-[70] bg-cream overflow-y-auto">
+                            <div className="max-w-[430px] mx-auto px-5 pt-4 pb-10 text-sm text-stone-700">
+                                <div className="flex items-center justify-between mb-3"><h2 className="font-black text-lg text-stone-800">特定商取引法に基づく表記</h2><button type="button" onClick={() => setShowLegal(false)} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow" aria-label="閉じる"><Icons.X className="w-5 h-5" /></button></div>
+                                <dl className="bg-white rounded-2xl border border-stone-200 divide-y divide-stone-100">
+                                    {[
+                                        ['販売業者', LEGAL.seller], ['運営責任者', LEGAL.manager], ['所在地', LEGAL.address],
+                                        ['電話番号', `${LEGAL.tel}${LEGAL.hours ? `（受付：${LEGAL.hours}）` : ''}`], ['お問い合わせ', '公式LINEのトーク、またはお電話'],
+                                        ['販売価格', '各商品に表示している価格（税込）'],
+                                        ['商品代金以外の料金', `配送の場合の送料 ¥${DELIVERY.fee.toLocaleString()}（税込）。商品合計 ¥${DELIVERY.freeThreshold.toLocaleString()} 以上で無料`],
+                                        ['お支払い方法', '店頭でのお受け取り時、または配達時に現金'],
+                                        ['お引き渡し時期', 'ご指定のお受け取り日・配送日'],
+                                        ['ご注文の締切', 'お受け取り日・配送日の前日 23:59'],
+                                        ['キャンセル', '前日 23:59 まで、注文画面の「ご注文」から。それ以降は公式LINEまたはお電話でご連絡ください'],
+                                        ['返品・交換', LEGAL.returns],
+                                    ].filter(([, v]) => v).map(([k, v]) => <div key={k} className="px-4 py-2.5"><dt className="text-xs font-bold text-stone-500">{k}</dt><dd className="mt-0.5">{v}</dd></div>)}
+                                </dl>
+                                <h2 className="font-black text-lg text-stone-800 mt-6 mb-3">個人情報の取り扱い</h2>
+                                <div className="bg-white rounded-2xl border border-stone-200 p-4 space-y-2 leading-relaxed">
+                                    <p>ご登録いただいたお名前・電話番号・店舗名・ご住所・ご注文内容・LINEのユーザー情報は、次の目的にのみ使用します。</p>
+                                    <ul className="list-disc pl-5 space-y-1"><li>ご注文の受付・商品のご用意・お届け</li><li>ご注文に関するご連絡（公式LINE・お電話）</li><li>請求書・領収書の発行</li></ul>
+                                    <p>法令にもとづく場合を除き、ご本人の同意なく第三者に提供することはありません。情報の確認・訂正・削除をご希望の場合は、上記のお問い合わせ先までご連絡ください。</p>
+                                </div>
+                                <p className="text-center text-xs text-stone-400 mt-6">{LEGAL.seller}</p>
                             </div>
                         </div>
                     )}

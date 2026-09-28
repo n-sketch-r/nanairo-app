@@ -113,6 +113,8 @@
             "ロケット": "images/rocket.jpg", "青じそ": "images/aojiso.jpg"
         };
 
+        const imgOf = (p) => (p && (p.imageUrl || IMAGE_MAP[p.name])) || null;
+
         const GAS_URL = "https://script.google.com/macros/s/AKfycbwv2XISbajDhH03WIIvr9-Br87CGaQcVYKtzk6flCluhncE6rfxlKS0fTN0vdbV5k-H9Q/exec"; 
 
         const toWareki = (dateStr) => {
@@ -195,6 +197,9 @@
             const [deliveryDone, setDeliveryDone] = useState(null); // 委託：納品の完了画面
             const [batchMenu, setBatchMenu] = useState(null);     // 委託：履歴の「⋯」メニュー
             const [showPass, setShowPass] = useState(false);
+            const [systemInfo, setSystemInfo] = useState(null);     // LINE送信数・バックアップ
+            const [isUploading, setIsUploading] = useState(false);
+            const [guideOpen, setGuideOpen] = useState(0);
             
             // モーダル・キャンセル関連
             const [showBulkLossModal, setShowBulkLossModal] = useState(false);
@@ -297,6 +302,7 @@
                     setAgencyDeliveriesAll(data.agencyDeliveriesAll || []);
                     setCustomerRecords(data.customers || []);
                     setServerSettings(data.settings || null);
+                    setSystemInfo(data.system || null);
                     if (data.orders) setOrders(data.orders);
                     if (data.analytics) setAnalytics(data.analytics);
                     setInsights(data.insights || null);
@@ -723,7 +729,7 @@
                 if (valid.length === 0) return showMessage('対象の注文がありません。');
                 const detailedOrders = [];
                 valid.forEach(o => {
-                    (o.itemsList || []).forEach(i => { const p = products.find(x => x.name === i.name); detailedOrders.push({ date: o.pickupDate, name: i.name, qty: i.qty, unitPrice: p ? Number(p.price) : 0 }); });
+                    (o.itemsList || []).forEach(i => { const p = allProducts.find(x => (i.id && x.id === i.id)) || allProducts.find(x => x.name === i.name); detailedOrders.push({ date: o.pickupDate, name: i.name, qty: i.qty, unitPrice: p ? Number(p.price) : 0 }); });
                     if (o.shippingFee > 0) detailedOrders.push({ date: o.pickupDate, name: '配送料', qty: 1, unitPrice: o.shippingFee, isShipping: true });
                 });
                 setPrintOrders([{ id: 'report-' + c.key, userName: c.name, detailedOrders }]); setPrintType('monthly_report');
@@ -1195,7 +1201,7 @@
                                 <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-2">
                                     {products.map(p => (
                                         <button key={p.id} type="button" onClick={() => openStockSheet(p.id)} className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left active:scale-[0.98] transition-transform">
-                                            {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
+                                            {imgOf(p) ? <img src={imgOf(p)} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
                                             <div className="p-2 flex items-end justify-between gap-1">
                                                 <div className="min-w-0"><div className="font-bold text-sm text-gray-900 truncate">{p.name}</div><div className="text-xs text-gray-500">{p.weight}</div></div>
                                                 <span className={`text-2xl font-bold leading-none ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500' : 'text-gray-900'}`}>{p.stock}</span>
@@ -1334,13 +1340,25 @@
                 if (moreView === 'receivables') return <div>{back}{renderReceivables()}</div>;
                 if (moreView === 'products') return <div>{back}{renderProducts()}</div>;
                 if (moreView === 'settings') return <div>{back}{renderSettings()}</div>;
+                if (moreView === 'guide') return <div>{back}{renderGuide()}</div>;
                 const unpaid = orders.filter(isUnpaid);
                 const items = [
                     ['analytics', '📊', '分析', '売上・廃棄・商品別・お客様', null],
                     ['receivables', '💴', '未集金・請求', unpaid.length ? `未集金 ¥${unpaid.reduce((a, o) => a + Number(o.totalPrice || 0), 0).toLocaleString()}（${unpaid.length}件）` : '未集金はありません', unpaid.length || null],
                     ['products', '🌿', '商品の管理', `追加・価格・販売の停止（販売中 ${allProducts.filter(p => p.active !== false).length}／${allProducts.length}）`, null],
                     ['settings', '⚙️', '設定', serverSettings && serverSettings.closedDays && serverSettings.closedDays.length ? `配送・送料・休業日（休業日 ${serverSettings.closedDays.length}日）` : '配送・送料・休業日', null],
+                    ['guide', '📖', '使い方ガイド', '注文・在庫・委託などの操作の流れ', null],
                 ];
+                const q = systemInfo && systemInfo.lineQuota;
+                const qRate = q && q.limit ? q.used / q.limit : null;
+                const pushErr = (() => { try { return systemInfo && systemInfo.lastPushError ? JSON.parse(systemInfo.lastPushError) : null; } catch (e) { return null; } })();
+                const backupAt = systemInfo && systemInfo.lastBackupAt;
+                const runBackup = async () => {
+                    setIsSavingAdmin(true);
+                    try { const r = await postAdmin({ action: 'backupNow' }); setSystemInfo(prev => ({ ...(prev || {}), lastBackupAt: r.backup.at })); showMessage('バックアップを取りました（Googleドライブの「マイクロハーブ_バックアップ」）'); }
+                    catch (e) { showMessage('バックアップできませんでした: ' + e.message, 8000); }
+                    finally { setIsSavingAdmin(false); }
+                };
                 return (
                     <div className="max-w-[600px]">
                         <h1 className="text-lg font-bold text-gray-900 mb-2">その他</h1>
@@ -1356,9 +1374,84 @@
                                 );
                             })}
                         </div>
+
+                        <h2 className="text-sm font-bold text-gray-700 mt-5 mb-2">システムの状態</h2>
+                        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 text-sm">
+                            <div className="px-4 py-3">
+                                <div className="flex justify-between items-center"><span className="font-bold text-gray-800">💬 LINEの送信数（今月）</span><b className={qRate >= 0.8 ? 'text-red-600' : 'text-gray-900'}>{q ? (q.limit ? `${q.used}／${q.limit}通` : `${q.used}通（上限なし）`) : '—'}</b></div>
+                                {q && q.limit && <div className="h-2 bg-gray-100 rounded-full mt-2 overflow-hidden"><div className={`h-full rounded-full ${qRate >= 0.8 ? 'bg-red-500' : qRate >= 0.6 ? 'bg-orange-400' : 'bg-nanairo-dark'}`} style={{ width: `${Math.min(100, qRate * 100)}%` }}></div></div>}
+                                <div className="text-[11px] text-gray-500 mt-1">{q && q.limit ? '上限を超えると、お客様への注文完了・リマインドが届かなくなります。80%で公式LINEのグループにお知らせします。' : 'GASを最新版にすると表示されます。'}</div>
+                                {pushErr && <div className="text-[11px] text-red-600 mt-1">最後の送信エラー：{new Date(pushErr.at).toLocaleString('ja-JP')}　{pushErr.message}</div>}
+                            </div>
+                            <div className="px-4 py-3 flex items-center justify-between gap-2">
+                                <div><div className="font-bold text-gray-800">🗂 自動バックアップ</div><div className="text-[11px] text-gray-500">毎週月曜の朝に保存（最新8回分）。{backupAt ? `最後：${new Date(backupAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'まだ保存されていません'}</div></div>
+                                <button type="button" onClick={runBackup} disabled={isSavingAdmin} className="text-xs font-bold text-nanairo-dark border border-nanairo-dark rounded-full px-3 py-1.5 shrink-0">{isSavingAdmin ? '保存中…' : '今すぐ保存'}</button>
+                            </div>
+                        </div>
                     </div>
                 );
             };
+
+            // 使い方ガイド（スタッフ向け）
+            const GUIDE = [
+                ['🧾', '注文が入ったら', [
+                    'LINEのグループに「新規注文」のお知らせが届きます。',
+                    '管理画面の「注文」を開くと、今日・明日・それ以降に分かれて並んでいます。',
+                    '上の「準備リスト」で、今日（明日）渡す商品の合計を確認して用意します。印刷もできます。',
+                    '用意ができたら注文をタップして「準備完了にする」。今日の分をまとめて押すなら「まとめて準備完了」。',
+                    'お渡し（配達）したら「お渡し済にする／配達済にする」、お金を受け取ったら「集金済」のスイッチをオン。',
+                    '押し間違えたら、画面の下に出る「取り消す」か、詳細の「ひとつ前の状態に戻す」で戻せます。',
+                ]],
+                ['🚚', '配送の日', [
+                    '配送がある日は「注文」の上に「○/○ の配送ルートを開く」ボタンが出ます。',
+                    '押すとGoogleマップが開き、今いる場所から配送先を順番に回る道案内が始まります。',
+                    '住所・電話は注文の詳細から「地図」「発信」で開けます。',
+                ]],
+                ['🌱', '収穫・販売・ロスを記録する', [
+                    '「在庫」で商品の写真をタップ →「収穫・販売・ロス」を選び、数を入れて記録。',
+                    '毎日の収穫は「まとめて入力」が便利です。全商品を表で一度に入れられます（「目安の数をまとめて入れる」も使えます）。',
+                    '売れ残りを捨てるときは「残りを全部ロス」。確認画面で内容を見てから実行します。残したい分は、そのあと「まとめて入力」で収穫として戻します。',
+                    '間違えたら、記録の直後に出る「取り消す」か、「最近の記録」をタップして取り消せます。',
+                ]],
+                ['🏪', '委託先に納品・精算する', [
+                    '「委託」でお店を選び「この委託先に納品する」→ 数を入れて「納品して納品書を発行」。完了画面から納品書を印刷できます。',
+                    'お店で数えたら「この店を精算する」→ 売れた数だけ入れると、ロスと請求額が自動で出ます。確定すると精算明細書が出ます。',
+                    '書類の再発行や取り消しは、履歴のカードの右上「⋯」から。',
+                    '店頭価格や手数料を変えるときは、お店の画面の「編集」から。',
+                ]],
+                ['👥', 'お客様・未集金・請求書', [
+                    '「お客様」で名前・電話で検索できます。お客様ごとに注文の履歴・未集金・メモが見られます。',
+                    '月締めの請求書は、お客様の画面の「○月の請求書」から作れます（お渡し済みの注文だけが入ります）。',
+                    '「その他 → 未集金・請求」で、まだ回収していないお金の合計とお客様ごとの一覧が見られます。',
+                ]],
+                ['🌿', '商品・写真・休業日を変える', [
+                    '「その他 → 商品の管理」で、価格・説明の変更、販売の停止（スイッチ）、写真の登録、新しい商品の追加ができます。',
+                    '「その他 → 設定」で、配送の曜日・時間・送料、店頭受け取りの時間帯、休業日（カレンダー）を変えられます。変更は注文画面にすぐ反映されます。',
+                ]],
+                ['🆘', '困ったとき', [
+                    '表示が古いときは、右上の更新ボタン（くるっとした矢印）を押してください。',
+                    '「パスワードが変更されたか…」と出たら、スタッフ用のパスワードを入れ直してください。',
+                    'LINEのお知らせが届かないときは「その他 → システムの状態」で送信数を確認してください。',
+                    'データは毎週自動でGoogleドライブにバックアップされています（「その他」から今すぐ保存も可能）。',
+                ]],
+            ];
+            const renderGuide = () => (
+                <div className="space-y-2 max-w-[600px]">
+                    <h2 className="text-lg font-bold text-gray-900">使い方ガイド</h2>
+                    {GUIDE.map(([icon, title, steps], i) => (
+                        <div key={title} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                            <button type="button" onClick={() => setGuideOpen(guideOpen === i ? -1 : i)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left">
+                                <span className="text-xl">{icon}</span><b className="flex-1 text-gray-900">{title}</b><span className="text-gray-400">{guideOpen === i ? '▲' : '▼'}</span>
+                            </button>
+                            {guideOpen === i && (
+                                <ol className="px-4 pb-4 space-y-2">
+                                    {steps.map((t, j) => <li key={j} className="flex gap-2.5 text-sm text-gray-700 leading-relaxed"><span className="w-6 h-6 rounded-full bg-nanairo-light text-nanairo-dark text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{j + 1}</span><span>{t}</span></li>)}
+                                </ol>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            );
 
             /* ===================== ★v5 後半：委託・商品の管理・設定・メモ ===================== */
             const agencyPriceOf = (agencyId, pid) => { const ap = agencyPrices.find(p => p.agencyId === agencyId && p.productId === pid); return ap ? Number(ap.storePrice) : 0; };
@@ -1537,6 +1630,30 @@
                 try { await postAdmin({ action: 'saveProduct', id: p.id, name: p.name, price: p.price, weight: String(p.weight).replace(/g$/, ''), desc: p.desc || '', active: !p.active }); showMessage(`${p.name} を${p.active ? '販売停止' : '販売中'}にしました`); fetchData(viewStartMonth, viewEndMonth); }
                 catch (e) { showMessage('変更できませんでした: ' + e.message, 7000); fetchData(viewStartMonth, viewEndMonth); }
             };
+            const shrinkImage = (file) => new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    const scale = Math.min(1, 1000 / Math.max(img.width, img.height));
+                    const c = document.createElement('canvas');
+                    c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+                    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                    resolve(c.toDataURL('image/jpeg', 0.82));
+                };
+                img.onerror = () => reject(new Error('写真を読み込めませんでした'));
+                img.src = URL.createObjectURL(file);
+            });
+            const uploadPhoto = async (file) => {
+                if (!file || !productEdit || !productEdit.id) return;
+                setIsUploading(true);
+                try {
+                    const dataUrl = await shrinkImage(file);
+                    const res = await postAdmin({ action: 'uploadProductImage', productId: productEdit.id, dataUrl });
+                    setProductEdit(prev => prev ? { ...prev, imageUrl: res.imageUrl } : prev);
+                    showMessage('写真を登録しました（注文画面にもすぐ出ます）');
+                    fetchData(viewStartMonth, viewEndMonth);
+                } catch (e) { showMessage('写真を登録できませんでした: ' + e.message, 8000); }
+                finally { setIsUploading(false); }
+            };
             const saveProductEdit = async () => {
                 const e = productEdit;
                 setIsSavingAdmin(true);
@@ -1554,14 +1671,14 @@
                         {allProducts.map(p => (
                             <div key={p.id} className={`flex items-center gap-3 px-3 py-2.5 ${p.active === false ? 'opacity-50' : ''}`}>
                                 <button type="button" onClick={() => setProductEdit({ ...p, weight: String(p.weight).replace(/g$/, ''), desc: p.desc || '', active: p.active !== false })} className="flex-1 min-w-0 flex items-center gap-3 text-left">
-                                    {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" /> : <div className="w-11 h-11 rounded-lg bg-nanairo-light flex items-center justify-center text-[9px] text-nanairo-dark font-bold shrink-0 text-center leading-tight">写真<br />なし</div>}
+                                    {imgOf(p) ? <img src={imgOf(p)} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" /> : <div className="w-11 h-11 rounded-lg bg-nanairo-light flex items-center justify-center text-[9px] text-nanairo-dark font-bold shrink-0 text-center leading-tight">写真<br />なし</div>}
                                     <div className="min-w-0"><b className="text-sm text-gray-900">{p.name}</b><div className="text-xs text-gray-500 truncate">¥{p.price}・{p.weight}{p.desc ? `・${p.desc}` : ''}</div></div>
                                 </button>
                                 <button type="button" onClick={() => toggleProductActive({ ...p, active: p.active !== false })} className="text-center shrink-0"><Switch on={p.active !== false} /><div className={`text-[9px] font-bold ${p.active !== false ? 'text-nanairo-dark' : 'text-gray-500'}`}>{p.active !== false ? '販売中' : '停止中'}</div></button>
                             </div>
                         ))}
                     </div>
-                    <p className="text-xs text-gray-500 leading-relaxed">スイッチで注文画面に出す・出さないを切り替えます（在庫や過去の記録は残ります）。商品名を変えても在庫はずれません。<br />写真は今のところ追加できません。新しい写真はファイルを送ってもらえれば入れます。</p>
+                    <p className="text-xs text-gray-500 leading-relaxed">スイッチで注文画面に出す・出さないを切り替えます（在庫や過去の記録は残ります）。商品名を変えても在庫・分析はずれません。<br />写真は商品をタップして「写真を選ぶ・撮る」から登録できます（Googleドライブに保存されます）。</p>
                 </div>
             );
 
@@ -2067,6 +2184,15 @@
                                 </div>
                                 <label className="block"><div className="text-[11px] font-bold text-gray-500 mb-1">一言説明（注文画面に表示・40文字まで）</div><input value={productEdit.desc} maxLength={40} onChange={e => setProductEdit({ ...productEdit, desc: e.target.value })} placeholder="例：ごまの香り・ピリッと辛い" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" /></label>
                                 <button type="button" onClick={() => setProductEdit({ ...productEdit, active: !productEdit.active })} className="w-full flex items-center justify-between px-1"><span className="text-sm text-gray-700">注文画面に出す（販売中）</span><Switch on={productEdit.active} /></button>
+                                <div className="flex items-center gap-3">
+                                    {imgOf(productEdit) ? <img src={imgOf(productEdit)} alt="" className="w-20 h-20 rounded-xl object-cover shrink-0" /> : <div className="w-20 h-20 rounded-xl bg-nanairo-light flex items-center justify-center text-xs text-nanairo-dark font-bold shrink-0">写真なし</div>}
+                                    {productEdit.id ? (
+                                        <label className={`flex-1 text-center py-3 rounded-xl border font-bold text-sm cursor-pointer ${isUploading ? 'border-gray-200 text-gray-400' : 'border-nanairo-dark text-nanairo-dark'}`}>
+                                            {isUploading ? '登録中…' : '📷 写真を選ぶ・撮る'}
+                                            <input type="file" accept="image/*" className="hidden" disabled={isUploading} onChange={e => { uploadPhoto(e.target.files[0]); e.target.value = ''; }} />
+                                        </label>
+                                    ) : <p className="flex-1 text-xs text-gray-500">写真は、商品を追加したあとに登録できます</p>}
+                                </div>
                                 {productEdit.id && <p className="text-[11px] text-gray-500">名前を変えても在庫・過去の記録はそのまま引き継がれます。</p>}
                                 <button type="button" onClick={saveProductEdit} disabled={isSavingAdmin || !productEdit.name.trim()} className={`w-full rounded-xl py-3 font-bold text-white ${isSavingAdmin || !productEdit.name.trim() ? 'bg-gray-300' : 'bg-nanairo-dark'}`}>{isSavingAdmin ? '保存中…' : '保存する'}</button>
                             </div>
@@ -2102,7 +2228,7 @@
                             <div className="fixed inset-0 bg-black/40 z-[60] flex flex-col justify-end items-center" onClick={() => !isSubmitting && setStockSheetOpen(false)}>
                                 <div className="bg-white rounded-t-3xl w-full max-w-[600px] p-4 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
                                     <div className="flex items-center gap-3">
-                                        {IMAGE_MAP[p.name] && <img src={IMAGE_MAP[p.name]} alt="" className="w-12 h-12 rounded-lg object-cover" />}
+                                        {imgOf(p) && <img src={imgOf(p)} alt="" className="w-12 h-12 rounded-lg object-cover" />}
                                         <div className="flex-1"><b className="text-gray-900">{p.name}</b><div className="text-xs text-gray-500">いまの在庫 {p.stock}</div></div>
                                         <button type="button" onClick={() => setStockSheetOpen(false)} className="p-1.5 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button>
                                     </div>

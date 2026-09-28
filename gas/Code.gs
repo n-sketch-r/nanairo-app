@@ -105,6 +105,7 @@ const COL_PROD_WEIGHT = 3;
 const COL_PROD_STOCK = 4;
 const COL_PROD_ACTIVE = 5;   // F: 販売中（TRUE/FALSE。空欄は販売中）
 const COL_PROD_DESC = 6;     // G: 一言説明（注文画面に表示）
+const COL_PROD_IMAGE = 7;    // H: 写真URL（管理画面から登録。Googleドライブに保存）
 
 const COL_ORD_STATUS = 8;
 const COL_ORD_SENMU_CHECK = 9;
@@ -299,6 +300,7 @@ function buildAdminData(data) {
     agencyDeliveriesAll: fetchAgencyDeliveries(),
     insights: buildInsights(allOrders, targetMonth, endMonth),
     customers: fetchCustomerRecords(),
+    system: { lineQuota: getLineQuota(), lastBackupAt: PROPS.getProperty("LAST_BACKUP_AT") || "", lastPushError: PROPS.getProperty("LAST_PUSH_ERROR") || "" },
     settings: getSettings()
   };
 }
@@ -342,7 +344,7 @@ function doPost(e) {
   const action = data.action || "order";
   const ADMIN_ACTIONS = ["getAdminData", "stockUpdate", "bulkLoss", "cancelStockLog", "statusUpdate", "toggleCheck",
     "agencyDelivery", "agencyInventory", "cancelAgencyDelivery", "cancelAgencyInventory", "checkAdmin",
-    "saveProduct", "saveAgency", "saveMemo", "saveSettings"];
+    "saveProduct", "saveAgency", "saveMemo", "saveSettings", "uploadProductImage", "backupNow"];
   const CUSTOMER_ACTIONS = ["order", "cancelOrder", "getUserOrders", "getProfile", "saveProfile"];
 
   // --- 認証 ---
@@ -408,6 +410,8 @@ function doPost(e) {
     else if (action === "saveAgency") response.agency = saveAgency(data);
     else if (action === "saveMemo") saveMemo(data);
     else if (action === "saveSettings") response.settings = saveSettings(data);
+    else if (action === "uploadProductImage") response.imageUrl = uploadProductImage(data);
+    else if (action === "backupNow") response.backup = backupSpreadsheet();
     else throw new Error("不明なアクションが指定されました: " + action);
   } catch (err) {
     response = { status: "error", message: err.toString() };
@@ -441,7 +445,8 @@ function fetchProducts() {
     weight: String(row[COL_PROD_WEIGHT] || "") + "g",
     stock: Number(row[COL_PROD_STOCK] || 0),
     active: isActiveCell(row[COL_PROD_ACTIVE]),
-    desc: String(row[COL_PROD_DESC] || "")
+    desc: String(row[COL_PROD_DESC] || ""),
+    imageUrl: String(row[COL_PROD_IMAGE] || "")
   })).filter(p => p.id && p.name);
 
   cache.put("products_cache", JSON.stringify(products), 21600);
@@ -595,6 +600,9 @@ function fetchOrders() {
       const p = s.split(" × ");
       return p.length === 2 ? { name: p[0].trim(), qty: parseInt(p[1], 10) } : null;
     }).filter(Boolean);
+    // S列の商品ID内訳（"2:3,5:1"）は商品と同じ順番で書いているので、順番どおりにIDを付ける
+    const ids = String(row[COL_ORD_ITEM_IDS] || "").split(",").map(x => x.split(":")[0]).filter(Boolean);
+    if (ids.length === itemsList.length) itemsList.forEach((it, i) => { it.id = ids[i]; });
 
     let formattedDate = row[6] instanceof Date ? Utilities.formatDate(row[6], "JST", "yyyy-MM-dd HH:mm") : String(row[6] || "").replace(/\//g, '-');
     let formattedPickupDate = row[2] instanceof Date ? Utilities.formatDate(row[2], "JST", "yyyy-MM-dd") : String(row[2] || "").substring(0, 10).replace(/\//g, '-');
@@ -1279,13 +1287,102 @@ function pushLine(to, text) {
   if (!LINE_TOKEN) { console.error("LINE_TOKEN が未設定のため送信できません"); return; }
   if (!to) return;
   try {
-    UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+    const res = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
       "method": "post",
       "headers": { "Content-Type": "application/json", "Authorization": "Bearer " + LINE_TOKEN },
       "payload": JSON.stringify({ "to": to, "messages": [{ "type": "text", "text": text }] }),
       "muteHttpExceptions": true
     });
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      // 429 = 今月の送信数の上限。管理画面の「その他」に表示する
+      PROPS.setProperty("LAST_PUSH_ERROR", JSON.stringify({ at: new Date().toISOString(), code: code, message: code === 429 ? "今月の送信数の上限に達しました" : String(res.getContentText()).slice(0, 120) }));
+    }
   } catch (e) { console.error("LINE送信エラー:", e); }
+}
+
+/* ===== ★LINEの送信数（無料プランは月200通） ===== */
+function getLineQuota() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get("line_quota");
+  if (hit) return JSON.parse(hit);
+  if (!LINE_TOKEN) return null;
+  try {
+    const h = { "headers": { "Authorization": "Bearer " + LINE_TOKEN }, "muteHttpExceptions": true };
+    const q = JSON.parse(UrlFetchApp.fetch("https://api.line.me/v2/bot/message/quota", h).getContentText());
+    const c = JSON.parse(UrlFetchApp.fetch("https://api.line.me/v2/bot/message/quota/consumption", h).getContentText());
+    const out = { limit: q.type === "limited" ? Number(q.value) : null, used: Number(c.totalUsage || 0), checkedAt: new Date().toISOString() };
+    cache.put("line_quota", JSON.stringify(out), 3600);
+    return out;
+  } catch (e) { return null; }
+}
+
+// ★毎朝9時：送信数が上限の80%・100%に近づいたら、スタッフのグループに1回だけ知らせる
+function checkLineQuota() {
+  CacheService.getScriptCache().remove("line_quota");
+  const q = getLineQuota();
+  if (!q || !q.limit) return;
+  const rate = q.used / q.limit;
+  const month = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM");
+  const level = rate >= 1 ? "100" : rate >= 0.8 ? "80" : "";
+  if (!level) return;
+  const key = "QUOTA_WARNED_" + month + "_" + level;
+  if (PROPS.getProperty(key)) return;
+  PROPS.setProperty(key, "1");
+  pushLineMessageToGroup(level === "100"
+    ? `⚠️【LINE送信数の上限】\n今月の送信数が上限（${q.limit}通）に達しました。\nお客様への注文完了・リマインドのお知らせが届かなくなっています。\nLINE公式アカウントのプラン変更をご検討ください。`
+    : `⚠️【LINE送信数のお知らせ】\n今月の送信数が ${q.used}／${q.limit}通（${Math.round(rate * 100)}%）になりました。\n上限を超えると、お客様へのお知らせが届かなくなります。`);
+}
+
+/* ===== ★自動バックアップ（毎週月曜の朝3時・最新8回分を残す） ===== */
+function backupFolder(name) {
+  const it = DriveApp.getFoldersByName(name);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(name);
+}
+
+function backupSpreadsheet() {
+  const folder = backupFolder("マイクロハーブ_バックアップ");
+  const stamp = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd_HHmm");
+  const copy = DriveApp.getFileById(SS.getId()).makeCopy("受発注バックアップ_" + stamp, folder);
+  // 古いものはゴミ箱へ（30日間は元に戻せる）
+  const files = [];
+  const it = folder.getFiles();
+  while (it.hasNext()) { const f = it.next(); if (f.getName().indexOf("受発注バックアップ_") === 0) files.push(f); }
+  files.sort((a, b) => b.getDateCreated() - a.getDateCreated());
+  files.slice(8).forEach(f => f.setTrashed(true));
+  const at = new Date().toISOString();
+  PROPS.setProperty("LAST_BACKUP_AT", at);
+  return { at: at, name: copy.getName(), url: copy.getUrl() };
+}
+
+/* ===== ★商品写真の登録（管理画面から。Googleドライブに保存して、誰でも見られるリンクにする） ===== */
+function uploadProductImage(data) {
+  const id = String(data.productId || "");
+  const m = String(data.dataUrl || "").match(/^data:(image\/(?:jpeg|png));base64,(.+)$/);
+  if (!id || !m) throw new Error("写真のデータが正しくありません。");
+  const values = SHEET_PRODUCTS.getDataRange().getValues();
+  let rowNum = -1;
+  for (let i = 1; i < values.length; i++) if (String(values[i][COL_PROD_ID]) === id) rowNum = i + 1;
+  if (rowNum < 0) throw new Error("商品が見つかりません。");
+  const bytes = Utilities.base64Decode(m[2]);
+  if (bytes.length > 2 * 1024 * 1024) throw new Error("写真が大きすぎます（2MBまで）。");
+  const folder = backupFolder("マイクロハーブ_商品写真");
+  const file = folder.createFile(Utilities.newBlob(bytes, m[1], `product_${id}_${Date.now()}.jpg`));
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const url = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w1000";
+  SHEET_PRODUCTS.getRange(rowNum, COL_PROD_IMAGE + 1).setValue(url);
+  clearProductsCache();
+  return url;
+}
+
+// ★初回だけエディタから実行：写真の列を作り、送信数チェック（毎朝9時）と自動バックアップ（毎週月曜3時）を設定する
+function setupV7() {
+  SHEET_PRODUCTS.getRange(1, COL_PROD_IMAGE + 1).setValue("写真URL");
+  ScriptApp.getProjectTriggers().forEach(t => { if (["checkLineQuota", "backupSpreadsheet"].indexOf(t.getHandlerFunction()) > -1) ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("checkLineQuota").timeBased().everyDays(1).atHour(9).inTimezone("Asia/Tokyo").create();
+  ScriptApp.newTrigger("backupSpreadsheet").timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(3).inTimezone("Asia/Tokyo").create();
+  const b = backupSpreadsheet(); // 最初の1回をすぐに取る
+  Logger.log("v7 の準備が完了しました（写真の列・送信数チェック・自動バックアップ）。最初のバックアップ：" + b.name);
 }
 
 function sendLineNotification(data) {
@@ -1439,7 +1536,7 @@ function buildInsights(allOrders, startMonth, endMonth) {
     t.line += goods; t.qty += qty; t.lineOrders++; t.shipping += Number(o.shippingFee || 0);
     if (o.deliveryMethod === METHOD_DELIVERY) t.delivery++; else t.pickup++;
     o.itemsList.forEach(it => {
-      const p = prod[idByName[it.name]]; if (!p) return;
+      const p = prod[it.id || idByName[it.name]]; if (!p) return;
       if (per === "cur") { p.soldLine += it.qty; p.sales += p.price * it.qty; }
       else { p.prevSold += it.qty; p.prevSales += p.price * it.qty; }
     });
