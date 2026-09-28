@@ -39,6 +39,18 @@ function checkSettings() {
   Logger.log("Ordersの見出し Q列: " + (header[COL_ORD_ID] || "★未設定（setupOrderColumns を実行してください）") + " / R列: " + (header[COL_ORD_PAID] || "★未設定"));
 }
 
+// エディタから実行して、スタッフのLINEグループにテスト通知を送る（トークンを差し替えた後の確認用）
+function testGroupNotification() {
+  if (!LINE_TOKEN) { Logger.log("LINE_TOKEN が未設定です"); return; }
+  const res = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+    "method": "post",
+    "headers": { "Content-Type": "application/json", "Authorization": "Bearer " + LINE_TOKEN },
+    "payload": JSON.stringify({ "to": LINE_GROUP_ID, "messages": [{ "type": "text", "text": "【テスト】LINE通知の確認です。このメッセージは無視してください。" }] }),
+    "muteHttpExceptions": true
+  });
+  Logger.log(res.getResponseCode() === 200 ? "送信できました（トークンは正常です）" : "送信できませんでした: " + res.getResponseCode() + " " + res.getContentText());
+}
+
 function sha256Hex(text) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(text), Utilities.Charset.UTF_8)
     .map(b => ((b + 256) % 256).toString(16).padStart(2, "0")).join("");
