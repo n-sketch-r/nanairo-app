@@ -6,9 +6,9 @@
     <title>なないろ菜・マイクロハーブ 発注システム</title>
     <link rel="apple-touch-icon" href="icon.png">
     
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.9/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
@@ -719,6 +719,10 @@
                                             <label className="block text-xs font-bold text-gray-500 mb-1">備考欄 (任意)</label>
                                             <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="ご要望があればご記入ください" className="block w-full border border-gray-300 rounded-lg p-3 text-base bg-gray-50 h-20 resize-none focus:ring-2 focus:ring-nanairo-dark outline-none appearance-none box-border"></textarea>
                                         </div>
+                                        {/* ★個人情報の利用目的の案内 */}
+                                        <p className="text-[10px] text-gray-500 leading-relaxed">
+                                            ご入力いただいたお名前・{isDelivery ? 'ご住所・電話番号・' : ''}ご注文内容は、商品のご用意{isDelivery ? '・お届け' : ''}・ご連絡のためにのみ使用し、それ以外の目的では使用しません。
+                                        </p>
                                     </div>
                                 </div>
                                 <div className="p-3 border-t sticky bottom-0 bg-white shrink-0 pb-safe">

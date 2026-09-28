@@ -8,9 +8,9 @@
     <link rel="apple-touch-icon" href="https://i.imgur.com/tqZC8OZ.png">
     <link rel="icon" type="image/png" href="https://i.imgur.com/tqZC8OZ.png">
     
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.9/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
     <script>
@@ -195,7 +195,7 @@
                 if (!loginInput || isLoggingIn) return;
                 setIsLoggingIn(true); setLoginError('');
                 try {
-                    const res = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ adminKey: getAdminKey(), action: "checkAdmin", adminKey: loginInput }) });
+                    const res = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "checkAdmin", adminKey: loginInput }) });
                     const d = await res.json();
                     if (d.status === 'success') {
                         try { localStorage.setItem('nanairo_admin_key', loginInput); } catch (e) {}
@@ -206,11 +206,24 @@
                 finally { setIsLoggingIn(false); }
             };
 
+            // ★管理用の送信。GASがエラーを返したら例外にする（失敗したのに「記録しました」と出さないため）
+            const postAdmin = async (body) => {
+                const res = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...body, adminKey: getAdminKey() }) });
+                let data = null;
+                try { data = await res.json(); } catch (e) { throw new Error('サーバーからの応答を読み取れませんでした'); }
+                if (data && data.message === 'AUTH_REQUIRED') {
+                    logout('パスワードが変更されたか、正しくありません。もう一度入力してください。');
+                    throw new Error('ログインし直してください');
+                }
+                if (!data || data.status === 'error') throw new Error(String((data && data.message) || '処理に失敗しました').replace(/^Error:\s*/, ''));
+                return data;
+            };
+
             const fetchData = async (startMonth, endMonth) => {
                 if (!adminKeyRef.current) { setIsLoadingData(false); return; }
                 setIsFetchingData(true);
                 try {
-                    const response = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ adminKey: getAdminKey(), action: "getAdminData", adminKey: getAdminKey(), month: startMonth, endMonth: endMonth }) });
+                    const response = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "getAdminData", adminKey: getAdminKey(), month: startMonth, endMonth: endMonth }) });
                     const data = await response.json();
                     if (data.message === 'AUTH_REQUIRED') return logout('パスワードが変更されたか、正しくありません。もう一度入力してください。');
                     if (data.status === 'error') return showMessage("データの取得に失敗しました。");
@@ -249,27 +262,21 @@
                 if (!selectedProductId) return showMessage("商品を選択してください");
                 setIsSubmitting(true);
                 try {
-                    await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo })
-                    });
+                    await postAdmin({ action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo });
                     const actionName = type === 'add' ? '収穫(追加)' : type === 'sale' ? '店頭販売' : 'ロス(破棄)';
                     showMessage(`${amount}件の「${actionName}」を記録しました！`);
                     fetchData(viewStartMonth, viewEndMonth); setAmount(1); setStockMemo(''); 
-                } catch(error) { showMessage("エラーが発生しました。"); } 
+                } catch(error) { showMessage("記録できませんでした: " + error.message, 6000); } 
                 finally { setIsSubmitting(false); }
             };
 
             const handleBulkLoss = async () => {
                 setIsBulkSubmitting(true);
                 try {
-                    await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "bulkLoss" })
-                    });
+                    await postAdmin({ action: "bulkLoss" });
                     showMessage(`現在在庫がある全商品を一括でロス(破棄)にしました！`);
                     fetchData(viewStartMonth, viewEndMonth);
-                } catch(error) { showMessage("エラーが発生しました。"); } 
+                } catch(error) { showMessage("一括ロスを記録できませんでした: " + error.message, 6000); } 
                 finally { setIsBulkSubmitting(false); setShowBulkLossModal(false); }
             };
 
@@ -277,14 +284,9 @@
                 if (!cancelTargetLog || isCancelling) return;
                 setIsCancelling(true);
                 try {
-                    const res = await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "cancelStockLog", rowIndex: cancelTargetLog.rowIndex })
-                    });
-                    const data = await res.json();
-                    if (data.status === 'error') showMessage("取消エラー: " + data.message);
-                    else { showMessage(`記録を取り消し、在庫を元に戻しました。`); fetchData(viewStartMonth, viewEndMonth); }
-                } catch(error) { showMessage("通信エラーが発生しました。"); } 
+                    await postAdmin({ action: "cancelStockLog", rowIndex: cancelTargetLog.rowIndex });
+                    showMessage(`記録を取り消し、在庫を元に戻しました。`); fetchData(viewStartMonth, viewEndMonth);
+                } catch(error) { showMessage("取消エラー: " + error.message, 6000); } 
                 finally { setIsCancelling(false); setCancelTargetLog(null); }
             };
 
@@ -293,13 +295,10 @@
                 const nextStatus = currentStatus === '未対応' ? '準備完了' : currentStatus === '準備完了' ? '受渡済' : '未対応';
                 setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: nextStatus } : o));
                 try {
-                    await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "statusUpdate", orderId: orderId, newStatus: nextStatus })
-                    });
+                    await postAdmin({ action: "statusUpdate", orderId: orderId, newStatus: nextStatus });
                     fetchData(viewStartMonth, viewEndMonth);
                 } catch(error) {
-                    showMessage("ステータス更新に失敗しました。");
+                    showMessage("ステータス更新に失敗しました: " + error.message, 6000);
                     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: currentStatus } : o));
                 }
             };
@@ -307,11 +306,8 @@
             const toggleCheck = async (orderId, role, isChecked) => {
                 setOrders(prev => prev.map(o => o.id === orderId ? { ...o, [role === 'senmu' ? 'senmuChecked' : 'cafeChecked']: isChecked } : o));
                 try {
-                    await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "toggleCheck", orderId: orderId, role: role, isChecked: isChecked })
-                    });
-                } catch(error) { showMessage("確認状態の更新に失敗しました。"); fetchData(viewStartMonth, viewEndMonth); }
+                    await postAdmin({ action: "toggleCheck", orderId: orderId, role: role, isChecked: isChecked });
+                } catch(error) { showMessage("確認状態の更新に失敗しました: " + error.message, 6000); fetchData(viewStartMonth, viewEndMonth); }
             };
 
             const openPrintPreview = (order, type) => {
@@ -359,10 +355,7 @@
                 });
 
                 try {
-                    await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "agencyDelivery", agencyId: agency.id, agencyName: agency.name, items: itemsToDeliver, deliveryDate: deliveryDate })
-                    });
+                    await postAdmin({ action: "agencyDelivery", agencyId: agency.id, agencyName: agency.name, items: itemsToDeliver, deliveryDate: deliveryDate });
                     showMessage(`${agency.name} への納品を記録しました！`);
                     
                     const invoiceData = {
@@ -378,7 +371,7 @@
                     };
                     setDeliveryCart({}); fetchData(viewStartMonth, viewEndMonth);
                     setPrintOrders([invoiceData]); setPrintType('agency_invoice');
-                } catch (error) { showMessage("納品エラーが発生しました。"); } 
+                } catch (error) { showMessage("納品を記録できませんでした: " + error.message, 6000); } 
                 finally { setIsSubmittingDelivery(false); }
             };
 
@@ -389,13 +382,10 @@
 
                 setIsSubmittingDelivery(true);
                 try {
-                    await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "agencyInventory", deliveryId: d.id, salesQty: invSalesQty, lossQty: invLossQty })
-                    });
+                    await postAdmin({ action: "agencyInventory", deliveryId: d.id, salesQty: invSalesQty, lossQty: invLossQty });
                     showMessage(`棚卸し（精算）を完了しました！`);
                     setInventoryModal(null); fetchData(viewStartMonth, viewEndMonth);
-                } catch (error) { showMessage("精算エラーが発生しました。"); } 
+                } catch (error) { showMessage("精算を記録できませんでした: " + error.message, 6000); } 
                 finally { setIsSubmittingDelivery(false); }
             };
 
@@ -403,14 +393,9 @@
                 if(!cancelDeliveryTarget || isCancelling) return;
                 setIsCancelling(true);
                 try {
-                    const res = await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "cancelAgencyDelivery", rowIndex: cancelDeliveryTarget.rowIndex })
-                    });
-                    const data = await res.json();
-                    if(data.status === 'error') showMessage("取消エラー: " + data.message);
-                    else { showMessage("納品を取り消し、在庫を元に戻しました。"); fetchData(viewStartMonth, viewEndMonth); }
-                } catch(e) { showMessage("通信エラーが発生しました。"); }
+                    await postAdmin({ action: "cancelAgencyDelivery", rowIndex: cancelDeliveryTarget.rowIndex });
+                    showMessage("納品を取り消し、在庫を元に戻しました。"); fetchData(viewStartMonth, viewEndMonth);
+                } catch(e) { showMessage("取消エラー: " + e.message, 6000); }
                 finally { setIsCancelling(false); setCancelDeliveryTarget(null); }
             };
 
@@ -418,14 +403,9 @@
                 if(!cancelInventoryTarget || isCancelling) return;
                 setIsCancelling(true);
                 try {
-                    const res = await fetch(GAS_URL, {
-                        method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ adminKey: getAdminKey(), action: "cancelAgencyInventory", rowIndex: cancelInventoryTarget.rowIndex })
-                    });
-                    const data = await res.json();
-                    if(data.status === 'error') showMessage("取消エラー: " + data.message);
-                    else { showMessage("精算を取り消し、未精算の状態に戻しました。"); fetchData(viewStartMonth, viewEndMonth); }
-                } catch(e) { showMessage("通信エラーが発生しました。"); }
+                    await postAdmin({ action: "cancelAgencyInventory", rowIndex: cancelInventoryTarget.rowIndex });
+                    showMessage("精算を取り消し、未精算の状態に戻しました。"); fetchData(viewStartMonth, viewEndMonth);
+                } catch(e) { showMessage("取消エラー: " + e.message, 6000); }
                 finally { setIsCancelling(false); setCancelInventoryTarget(null); }
             };
 
