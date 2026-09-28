@@ -138,6 +138,11 @@
             const [, m, d] = dateStr.split('-').map(Number);
             return `${m}/${d}(${WEEK[weekdayOf(dateStr)]})`;
         };
+        // 前日の yyyy-MM-dd（キャンセル期限の表示用）
+        const prevDayStr = (dateStr) => {
+            const [y, m, d] = String(dateStr).split('-').map(Number);
+            return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+        };
         // 明日以降で配送できる日の一覧
         const getDeliveryDates = () => {
             const list = [];
@@ -189,6 +194,8 @@
             const [detailProduct, setDetailProduct] = useState(null); // 商品の詳しい画面
             const [loadError, setLoadError] = useState(false);        // 商品一覧が読み込めなかった
             const [bumpKey, setBumpKey] = useState(0);                // カートのボタンを弾ませる合図
+            const [showGuide, setShowGuide] = useState(() => { try { return !localStorage.getItem('nanairo_guide_seen'); } catch (e) { return false; } });
+            const closeGuide = () => { setShowGuide(false); try { localStorage.setItem('nanairo_guide_seen', '1'); } catch (e) {} };
 
             const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -614,100 +621,95 @@
                             </>
                         ) : (
                             <div className="pb-20">
-                                <div className="flex justify-between items-center mb-2">
-                                    <h2 className="font-bold text-lg text-gray-800 flex items-center gap-2">
-                                        <Icons.History className="w-5 h-5 text-nanairo-dark" />履歴・キャンセル
-                                    </h2>
-                                    {isLoadingHistory && <div className="spinner border-l-nanairo-dark w-4 h-4"></div>}
-                                </div>
-                                
-                                <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 mb-4 flex gap-2 items-start">
-                                    <Icons.Info className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
-                                    <p className="text-xs text-gray-500 leading-relaxed">
-                                        キャンセルは受取日（配送日）の前日23:59まで、「未対応」のご注文のみ可能です。それ以降の変更は公式LINEまたはお電話にてご連絡ください。
-                                    </p>
-                                </div>
-                                
-                                {customer && (
-                                    <button type="button" onClick={() => openCustomerForm(customer)} className="w-full mb-4 text-left bg-white border border-gray-200 rounded-lg p-3 text-xs text-gray-600 active:bg-gray-50">
-                                        <div className="font-bold text-gray-800 mb-0.5">ご登録情報（タップで変更）</div>
-                                        {customer.fullName} 様／{customer.phone}{customer.storeName ? `／${customer.storeName}` : ''}
-                                    </button>
-                                )}
-                                <div className="space-y-3">
-                                    {pastOrders.length === 0 ? (
-                                        <div className="text-center py-8 bg-white rounded-2xl border border-stone-200"><img src="images/logo.png" alt="" className="w-20 h-20 object-contain mx-auto opacity-80" /><p className="text-stone-500 text-sm mt-2">まだご注文はありません</p></div>
-                                    ) : pastOrders.map(order => {
-                                        const isCancelled = order.status === 'キャンセル';
-                                        const isCompleted = order.status === '受渡済';
-                                        const isCancellable = order.status === '未対応' && order.pickupDate > jstDateStr(0); // 前日23:59まで
-                                        
-                                        return (
-                                            <div key={order.id} className={`border rounded-2xl p-4 shadow-sm relative overflow-hidden ${isCancelled ? 'bg-stone-100 border-stone-200 opacity-70' : 'bg-white border-stone-200'}`}>
-                                                
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <div className="text-xs text-gray-500">{order.orderDate} 注文</div>
-                                                    <div className={`text-xs font-bold px-2 py-1 rounded-full ${
-                                                        isCancelled ? 'bg-gray-300 text-gray-600' :
-                                                        isCompleted ? 'bg-gray-800 text-white' :
-                                                        order.status === '未対応' ? 'bg-red-100 text-red-600' :
-                                                        'bg-nanairo-dark text-white'
-                                                    }`}>
-                                                        {order.status}
-                                                    </div>
-                                                </div>
-                                                
-                                                <div className={`text-xs font-bold mb-2 flex items-center gap-1.5 ${isCancelled ? 'text-gray-400' : 'text-gray-700'}`}>
-                                                    {order.deliveryMethod === METHOD_DELIVERY ? (
-                                                        <><span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-xs flex items-center gap-0.5"><Icons.Truck className="w-3 h-3" />配送</span>{formatJpDate(order.pickupDate)} {order.pickupTime}</>
-                                                    ) : (
-                                                        <><span className="bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded text-xs flex items-center gap-0.5"><Icons.Store className="w-3 h-3" />店頭</span>{formatJpDate(order.pickupDate)} {order.pickupTime}</>
-                                                    )}
-                                                </div>
-                                                {!isCancelled && (() => {
-                                                    const steps = ['ご注文受付', '準備完了', order.deliveryMethod === METHOD_DELIVERY ? 'お届け済み' : 'お渡し済み'];
-                                                    const cur = order.status === '受渡済' ? 2 : order.status === '準備完了' ? 1 : 0;
-                                                    return (
-                                                        <div className="flex items-center mb-3">
-                                                            {steps.map((label, i) => (
-                                                                <React.Fragment key={label}>
-                                                                    {i > 0 && <div className={`flex-1 h-0.5 -mt-5 ${i <= cur ? 'bg-nanairo-dark' : 'bg-stone-200'}`}></div>}
-                                                                    <div className="flex flex-col items-center w-16">
-                                                                        <div className={`w-5 h-5 rounded-full flex items-center justify-center ${i <= cur ? 'bg-nanairo-dark text-white' : 'bg-stone-200 text-stone-400'}`}>{i <= cur ? <Icons.Check className="w-3 h-3" /> : <span className="text-xs">{i + 1}</span>}</div>
-                                                                        <span className={`text-xs mt-1 whitespace-nowrap ${i <= cur ? 'text-nanairo-dark font-bold' : 'text-stone-400'}`}>{label}</span>
-                                                                    </div>
-                                                                </React.Fragment>
-                                                            ))}
-                                                        </div>
-                                                    );
-                                                })()}
-                                                <ul className={`text-sm font-medium space-y-1 mb-3 ${isCancelled ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
-                                                    {order.itemsList && order.itemsList.map((item, idx) => (
-                                                        <li key={idx}>{item.name} × {item.qty}</li>
-                                                    ))}
-                                                </ul>
-                                                
-                                                <div className="flex justify-between items-end pt-3 border-t border-gray-200">
-                                                    <span className={`font-bold ${isCancelled ? 'text-gray-500' : 'text-gray-900'}`}>
-                                                        ¥{(order.totalPrice || 0).toLocaleString()}
-                                                        {order.shippingFee > 0 && <span className="text-xs font-normal text-gray-500 ml-1">(送料¥{order.shippingFee}込)</span>}
-                                                    </span>
-                                                    
-                                                    <div className="flex gap-2">
-                                                        {isCancellable && (
-                                                            <button onClick={() => setCancelTarget(order)} className="text-red-500 border border-red-300 bg-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-sm active:bg-red-50 transition-colors">
-                                                                キャンセル
-                                                            </button>
-                                                        )}
-                                                        <button onClick={() => copyFromHistory(order.itemsList)} className="bg-nanairo-dark text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-sm active:bg-green-700 transition-colors">
-                                                            再注文
-                                                        </button>
-                                                    </div>
-                                                </div>
+                                {(() => {
+                                    const today = jstDateStr(0);
+                                    // これからのご注文：受取日が今日以降で、キャンセル・お渡し済みでないもの（日付の近い順）
+                                    const upcoming = pastOrders.filter(o => o.status !== 'キャンセル' && o.status !== '受渡済' && o.pickupDate >= today)
+                                        .sort((a, b) => (a.pickupDate + a.pickupTime).localeCompare(b.pickupDate + b.pickupTime));
+                                    const finished = pastOrders.filter(o => !upcoming.includes(o));
+                                    const timeText = (o) => o.deliveryMethod === METHOD_DELIVERY ? `${formatJpDate(o.pickupDate)} ${String(o.pickupTime).replace('-', '〜')}頃` : `${formatJpDate(o.pickupDate)} ${String(o.pickupTime).replace('-', '〜')}`;
+                                    const itemsText = (o) => (o.itemsList || []).map(i => `${i.name} × ${i.qty}`).join('、');
+                                    return (
+                                        <>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <h2 className="font-black text-stone-800">これからのご注文</h2>
+                                                {isLoadingHistory && <div className="spinner border-l-nanairo-dark w-4 h-4"></div>}
                                             </div>
-                                        )
-                                    })}
-                                </div>
+                                            {upcoming.length === 0 ? (
+                                                <div className="text-center py-8 bg-white rounded-2xl border border-stone-200 mb-5">
+                                                    <img src="images/logo.png" alt="" className="w-20 h-20 object-contain mx-auto opacity-80" />
+                                                    <p className="text-stone-500 text-sm mt-2">これからのご注文はありません</p>
+                                                    <button type="button" onClick={() => setActiveTab('home')} className="mt-3 text-sm font-bold text-nanairo-dark underline">商品を見る</button>
+                                                </div>
+                                            ) : upcoming.map(order => {
+                                                const isDeliv = order.deliveryMethod === METHOD_DELIVERY;
+                                                const isCancellable = order.status === '未対応' && order.pickupDate > today; // 前日23:59まで
+                                                const steps = ['受付', '準備完了', isDeliv ? 'お届け' : 'お渡し'];
+                                                const cur = order.status === '準備完了' ? 1 : 0;
+                                                return (
+                                                    <div key={order.id} className="bg-white rounded-2xl border border-stone-200 overflow-hidden mb-3">
+                                                        <div className={`px-4 py-3 ${isDeliv ? 'bg-blue-50' : 'bg-nanairo-light'}`}>
+                                                            <div className={`text-xs font-bold ${isDeliv ? 'text-blue-600' : 'text-nanairo-dark'}`}>{isDeliv ? '🚚 配送' : '🏪 店頭でお受け取り'}</div>
+                                                            <div className="text-lg font-black text-stone-800 leading-tight mt-0.5">{timeText(order)}</div>
+                                                        </div>
+                                                        <div className="px-4 py-3">
+                                                            <div className="flex items-center mb-3">
+                                                                {steps.map((label, i) => (
+                                                                    <React.Fragment key={label}>
+                                                                        {i > 0 && <div className={`flex-1 h-0.5 -mt-5 ${i <= cur ? 'bg-nanairo-dark' : 'bg-stone-200'}`}></div>}
+                                                                        <div className="flex flex-col items-center w-16">
+                                                                            <div className={`w-5 h-5 rounded-full flex items-center justify-center ${i <= cur ? 'bg-nanairo-dark text-white' : 'bg-stone-200 text-stone-400'}`}>{i <= cur ? <Icons.Check className="w-3 h-3" /> : <span className="text-xs">{i + 1}</span>}</div>
+                                                                            <span className={`text-xs mt-1 whitespace-nowrap ${i <= cur ? 'text-nanairo-dark font-bold' : 'text-stone-400'}`}>{label}</span>
+                                                                        </div>
+                                                                    </React.Fragment>
+                                                                ))}
+                                                            </div>
+                                                            <div className="text-sm text-stone-700">{itemsText(order)}</div>
+                                                            <div className="flex justify-between items-end mt-1">
+                                                                <span className="text-xs text-stone-500">{isDeliv ? '配達時に現金' : 'お受け取り時に現金'}{order.shippingFee > 0 ? `（送料¥${order.shippingFee}込）` : ''}</span>
+                                                                <span className="font-black text-stone-900">¥{(order.totalPrice || 0).toLocaleString()}</span>
+                                                            </div>
+                                                            {isCancellable ? (
+                                                                <>
+                                                                    <button type="button" onClick={() => setCancelTarget(order)} className="mt-3 w-full rounded-full py-2 border border-red-300 text-red-500 text-sm font-bold active:bg-red-50">キャンセルする</button>
+                                                                    <p className="text-xs text-stone-500 text-center mt-1">{formatJpDate(prevDayStr(order.pickupDate))} 23:59 までキャンセルできます</p>
+                                                                </>
+                                                            ) : (
+                                                                <button type="button" onClick={closeApp} className="mt-3 w-full rounded-full py-2 bg-stone-100 text-stone-700 text-sm font-bold">💬 変更・キャンセルはトークで連絡</button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {finished.length > 0 && (
+                                                <details className="mt-5 mb-4" open={upcoming.length === 0}>
+                                                    <summary className="font-black text-stone-800 mb-2 cursor-pointer">これまでのご注文（{finished.length}件）</summary>
+                                                    <div className="bg-white rounded-2xl border border-stone-200 divide-y divide-stone-100">
+                                                        {finished.map(order => {
+                                                            const isCancelled = order.status === 'キャンセル';
+                                                            const label = isCancelled ? 'キャンセル' : order.status === '受渡済' ? (order.deliveryMethod === METHOD_DELIVERY ? 'お届け済み' : 'お受け取り済み') : 'ご注文';
+                                                            return (
+                                                                <div key={order.id} className={`flex items-center justify-between gap-2 px-4 py-3 ${isCancelled ? 'opacity-50' : ''}`}>
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-sm font-bold text-stone-800">{formatJpDate(order.pickupDate)} {label}</div>
+                                                                        <div className={`text-xs text-stone-500 truncate ${isCancelled ? 'line-through' : ''}`}>{itemsText(order)}　¥{(order.totalPrice || 0).toLocaleString()}</div>
+                                                                    </div>
+                                                                    {!isCancelled && <button type="button" onClick={() => copyFromHistory(order.itemsList)} className="shrink-0 text-xs font-bold text-nanairo-dark border border-nanairo-dark rounded-full px-3 py-1.5 whitespace-nowrap">もう一度注文</button>}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </details>
+                                            )}
+
+                                            {customer && (
+                                                <button type="button" onClick={() => openCustomerForm(customer)} className="w-full text-xs text-stone-500 underline py-2">ご登録情報（{customer.fullName} 様）の変更</button>
+                                            )}
+                                            <button type="button" onClick={() => setShowGuide(true)} className="w-full text-xs text-stone-500 underline py-2">使い方を見る</button>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         )}
                     </main>
@@ -732,11 +734,11 @@
                     <div className="fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[430px] bg-white border-t border-stone-200 flex z-20 box-border" style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}>
                         <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'home' ? 'text-nanairo-dark' : 'text-stone-400'}`}>
                             <Icons.Store className="w-5 h-5" />
-                            <span className="text-xs font-bold">ショップ</span>
+                            <span className="text-xs font-bold">注文する</span>
                         </button>
                         <button onClick={() => setActiveTab('history')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'history' ? 'text-nanairo-dark' : 'text-stone-400'}`}>
                             <Icons.History className="w-5 h-5" />
-                            <span className="text-xs font-bold">履歴・キャンセル</span>
+                            <span className="text-xs font-bold">ご注文</span>
                         </button>
                     </div>
 
@@ -917,6 +919,25 @@
                                         )}
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showGuide && !showCustomerForm && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-fade-in">
+                            <div className="bg-cream rounded-3xl p-5 w-full max-w-[360px] text-center">
+                                <img src="images/logo.png" alt="" className="w-24 h-24 object-contain mx-auto" />
+                                <h3 className="font-black text-xl text-nanairo-dark mt-1">かんたん3ステップ</h3>
+                                <div className="text-left mt-4 space-y-3">
+                                    {[['商品を選ぶ', '「カートに入れる」を押します'], ['カートを見る', '画面の下の緑のボタンです'], ['受け取り方法と日時を選ぶ', '「予約する」で完了。LINEにお知らせが届きます']].map(([t, d], i) => (
+                                        <div key={t} className="flex gap-3 items-center bg-white rounded-2xl p-3">
+                                            <span className="w-8 h-8 rounded-full bg-nanairo-dark text-white font-black flex items-center justify-center shrink-0">{i + 1}</span>
+                                            <div><b className="text-stone-800">{t}</b><div className="text-xs text-stone-500">{d}</div></div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-stone-500 mt-3">注文の確認・キャンセルは、下の「ご注文」からできます。</p>
+                                <button type="button" onClick={closeGuide} className="mt-4 w-full rounded-full py-3 bg-nanairo-dark text-white font-bold">はじめる</button>
                             </div>
                         </div>
                     )}
