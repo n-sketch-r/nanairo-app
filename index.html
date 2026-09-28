@@ -61,6 +61,7 @@
             Store: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/></svg>,
             Check: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20 6 9 17l-5-5"/></svg>,
             AlertCircle: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+            Truck: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/><path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>,
             Info: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         };
 
@@ -80,6 +81,43 @@
             "レッドラディッシュ": "https://i.imgur.com/qLzbZzV.jpeg",
             "ロケット": "https://i.imgur.com/qYRy12U.jpeg",
             "青じそ": "https://i.imgur.com/IywcF1I.jpeg"
+        };
+
+        // ★配送ルール（GAS側の DELIVERY と同じ値にしてください）
+        const DELIVERY = {
+            days: [1, 2],                // 配送できる曜日（0=日,1=月,2=火 ...）
+            time: "16:00-17:00",         // 配送時間帯
+            freeThreshold: 1000,         // この金額以上で送料無料（商品合計・税込）
+            fee: 500,                    // 送料（税込）
+            areas: ["鶴岡市", "酒田市", "三川町", "庄内町", "遊佐町"],
+            weeksAhead: 4                // 何週先まで選べるか
+        };
+        const METHOD_PICKUP = "店頭受取";
+        const METHOD_DELIVERY = "配送";
+        const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
+
+        // ★日本時間で「今日から n 日後」を yyyy-MM-dd で返す（toISOStringのUTCずれ対策）
+        const jstDateStr = (addDays = 0) => {
+            const d = new Date(Date.now() + 9 * 3600 * 1000 + addDays * 86400 * 1000);
+            return d.toISOString().split('T')[0];
+        };
+        const weekdayOf = (dateStr) => {
+            const [y, m, d] = String(dateStr).split('-').map(Number);
+            return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        };
+        const formatJpDate = (dateStr) => {
+            if (!dateStr) return "";
+            const [, m, d] = dateStr.split('-').map(Number);
+            return `${m}/${d}(${WEEK[weekdayOf(dateStr)]})`;
+        };
+        // 明日以降で配送できる日の一覧
+        const getDeliveryDates = () => {
+            const list = [];
+            for (let i = 1; i <= DELIVERY.weeksAhead * 7; i++) {
+                const ds = jstDateStr(i);
+                if (DELIVERY.days.includes(weekdayOf(ds))) list.push(ds);
+            }
+            return list;
         };
 
         function App() {
@@ -105,17 +143,35 @@
             const [minPickupDate, setMinPickupDate] = useState(""); // ★追加: 選択可能な最短日
             const [pickupTime, setPickupTime] = useState("11:00-12:00");
             const [memo, setMemo] = useState("");
-            
+
+            // ★配送対応
+            const [deliveryMethod, setDeliveryMethod] = useState(METHOD_PICKUP);
+            const deliveryDates = useMemo(() => getDeliveryDates(), []);
+            const [deliveryDate, setDeliveryDate] = useState("");
+            const [city, setCity] = useState(DELIVERY.areas[0]);
+            const [addressDetail, setAddressDetail] = useState("");
+            const [phone, setPhone] = useState("");
+            const [errorMsg, setErrorMsg] = useState("");
+            const [lastOrder, setLastOrder] = useState(null);
+
             const [isSubmitting, setIsSubmitting] = useState(false);
 
             useEffect(() => {
-                // ★修正: 当日を弾き、最短選択日を「明日」に設定
-                const tomorrow = new Date();
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                const minDateStr = tomorrow.toISOString().split('T')[0];
-                
+                // ★修正: 日本時間で「明日」を最短日にする（朝9時前に日付がずれる不具合を修正）
+                const minDateStr = jstDateStr(1);
+
                 setPickupDate(minDateStr);     // 初期値を明日にセット
                 setMinPickupDate(minDateStr);  // カレンダーの選択ブロック用にセット
+
+                // 前回入力した配送先を復元（この端末のみに保存）
+                try {
+                    const saved = JSON.parse(localStorage.getItem('nanairo_delivery') || 'null');
+                    if (saved) {
+                        if (DELIVERY.areas.includes(saved.city)) setCity(saved.city);
+                        setAddressDetail(saved.addressDetail || "");
+                        setPhone(saved.phone || "");
+                    }
+                } catch (e) {}
 
                 const savedHistory = JSON.parse(localStorage.getItem('nanairo_history') || '[]');
                 setPastOrders(savedHistory);
@@ -146,7 +202,11 @@
                         setIsLiffReady(true);
                     });
 
-                fetch(`${GAS_URL}?action=getProducts`)
+                loadProducts();
+            }, []);
+
+            const loadProducts = () => {
+                return fetch(`${GAS_URL}?action=getProducts&t=${Date.now()}`)
                     .then(res => res.json())
                     .then(data => {
                         if (Array.isArray(data)) {
@@ -162,7 +222,7 @@
                     })
                     .catch(err => console.error("データ取得エラー", err))
                     .finally(() => setIsLoadingData(false));
-            }, []);
+            };
 
             const fetchUserOrders = (uid) => {
                 setIsLoadingHistory(true);
@@ -196,8 +256,21 @@
                     const product = productsData.find(p => p.id === id);
                     if (product) { totalItems += quantity; totalPrice += product.price * quantity; }
                 });
-                return { totalItems, totalPrice };
-            }, [cart, productsData]);
+                // ★配送料（商品合計が基準額以上なら無料）
+                const isDelivery = deliveryMethod === METHOD_DELIVERY;
+                const shippingFee = isDelivery && totalPrice < DELIVERY.freeThreshold ? DELIVERY.fee : 0;
+                const untilFree = Math.max(0, DELIVERY.freeThreshold - totalPrice);
+                return { totalItems, totalPrice, shippingFee, untilFree, grandTotal: totalPrice + shippingFee };
+            }, [cart, productsData, deliveryMethod]);
+
+            const isDelivery = deliveryMethod === METHOD_DELIVERY;
+            const phoneDigits = phone.replace(/[^\d]/g, "");
+            // 予約ボタンを押せない理由（なければ空文字）
+            const formProblem = isDelivery
+                ? (!deliveryDate ? '配送日を選択してください'
+                    : !addressDetail.trim() ? 'ご住所を入力してください'
+                    : phoneDigits.length < 10 ? '電話番号を入力してください' : '')
+                : (!pickupDate ? '来店予定日を入力してください' : '');
 
             const copyFromHistory = (itemsList) => { 
                 const newCart = {};
@@ -213,8 +286,9 @@
             };
 
             const handleOrderSubmit = async () => {
-                if (isSubmitting) return;
+                if (isSubmitting || formProblem) return;
                 setIsSubmitting(true);
+                setErrorMsg("");
 
                 const orderItemsString = Object.entries(cart).map(([id, qty]) => {
                     const p = productsData.find(p => p.id === id);
@@ -226,26 +300,50 @@
                     userName: userName,
                     userId: userId,
                     orderItems: orderItemsString,
-                    pickupDate: pickupDate,
-                    pickupTime: pickupTime,
+                    deliveryMethod: deliveryMethod,
+                    pickupDate: isDelivery ? deliveryDate : pickupDate,
+                    pickupTime: isDelivery ? DELIVERY.time : pickupTime,
+                    city: isDelivery ? city : "",
+                    addressDetail: isDelivery ? addressDetail.trim() : "",
+                    phone: isDelivery ? phone.trim() : "",
                     memo: memo || "なし",
-                    totalPrice: cartSummary.totalPrice
+                    totalPrice: cartSummary.grandTotal // 参考値（金額はサーバー側で再計算します）
                 };
 
                 try {
-                    await fetch(GAS_URL, {
+                    const res = await fetch(GAS_URL, {
                         method: "POST",
                         headers: { "Content-Type": "text/plain;charset=utf-8" },
                         body: JSON.stringify(payload)
                     });
-                    
+                    const result = await res.json();
+                    // ★修正: エラーなのに「完了」と表示される不具合を修正
+                    if (!result || result.status !== "success") {
+                        setErrorMsg((result && result.message ? String(result.message).replace(/^Error:\s*/, '') : "ご注文を受け付けられませんでした。") );
+                        loadProducts(); // 在庫が変わっている可能性があるので再取得
+                        return;
+                    }
+
+                    if (isDelivery) {
+                        try { localStorage.setItem('nanairo_delivery', JSON.stringify({ city, addressDetail: addressDetail.trim(), phone: phone.trim() })); } catch (e) {}
+                    }
+                    setLastOrder({
+                        method: deliveryMethod,
+                        date: payload.pickupDate,
+                        time: payload.pickupTime,
+                        address: isDelivery ? city + addressDetail.trim() : "",
+                        total: result.totalPrice ?? cartSummary.grandTotal
+                    });
                     if(userId) fetchUserOrders(userId);
+                    loadProducts();
 
                     setShowConfirm(false);
                     setShowComplete(true);
                     setCart({});
+                    setMemo("");
                 } catch (error) {
                     console.error("送信エラー:", error);
+                    setErrorMsg("通信エラーが発生しました。電波の良い場所で、もう一度お試しください。");
                 } finally {
                     setIsSubmitting(false);
                 }
@@ -256,7 +354,7 @@
                 setIsCancelling(true);
                 
                 try {
-                    await fetch(GAS_URL, {
+                    const res = await fetch(GAS_URL, {
                         method: "POST",
                         headers: { "Content-Type": "text/plain;charset=utf-8" },
                         body: JSON.stringify({
@@ -265,18 +363,25 @@
                             userId: userId
                         })
                     });
+                    const result = await res.json();
+                    if (!result || result.status !== "success") {
+                        alert((result && result.message ? String(result.message).replace(/^Error:\s*/, '') : "キャンセルできませんでした。") + "\nお手数ですが公式LINEまたはお電話でご連絡ください。");
+                        if (userId) fetchUserOrders(userId);
+                        return;
+                    }
                     
                     const newOrders = pastOrders.map(o => 
                         o.id === cancelTarget.id ? { ...o, status: 'キャンセル' } : o
                     );
                     setPastOrders(newOrders);
                     localStorage.setItem('nanairo_history', JSON.stringify(newOrders));
-                    
-                    setCancelTarget(null);
+                    loadProducts();
                 } catch (error) {
                     console.error("キャンセルエラー:", error);
+                    alert("通信エラーが発生しました。もう一度お試しください。");
                 } finally {
                     setIsCancelling(false);
+                    setCancelTarget(null);
                 }
             };
 
@@ -299,7 +404,15 @@
                             <>
                                 <div className="flex justify-between items-end border-b border-gray-200 pb-2 mb-2">
                                     <h2 className="text-lg font-bold text-gray-800">{userName}様</h2>
-                                    <span className="text-sm text-gray-600">本日のご注文</span>
+                                    <span className="text-xs text-gray-500 flex items-center gap-1"><Icons.Truck className="w-3.5 h-3.5 text-nanairo-dark" />店頭受取・配送OK</span>
+                                </div>
+
+                                <div className="bg-nanairo-light/60 border border-green-200 rounded-xl p-3 flex gap-2.5 items-start">
+                                    <Icons.Truck className="w-5 h-5 text-nanairo-dark shrink-0 mt-0.5" />
+                                    <div className="text-[11px] text-gray-700 leading-relaxed">
+                                        <p className="font-bold text-gray-800 text-xs mb-0.5">庄内一円に配送できます</p>
+                                        <p>毎週{DELIVERY.days.map(d => WEEK[d]).join('・')}曜 {DELIVERY.time.replace('-', '〜')}／<span className="font-bold text-nanairo-dark">¥{DELIVERY.freeThreshold.toLocaleString()}以上で送料無料</span>（未満は¥{DELIVERY.fee}）</p>
+                                    </div>
                                 </div>
 
                                 <section>
@@ -372,7 +485,7 @@
                                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 mb-4 flex gap-2 items-start">
                                     <Icons.Info className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
                                     <p className="text-[10px] text-gray-500 leading-relaxed">
-                                        「準備完了」「受渡済」となったご注文はシステムからキャンセルできません。変更がある場合は直接お電話にてご連絡ください。
+                                        「準備完了」「受渡済」となったご注文はシステムからキャンセルできません。変更がある場合は公式LINEまたはお電話にてご連絡ください。
                                     </p>
                                 </div>
                                 
@@ -399,6 +512,13 @@
                                                     </div>
                                                 </div>
                                                 
+                                                <div className={`text-xs font-bold mb-2 flex items-center gap-1.5 ${isCancelled ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                    {order.deliveryMethod === METHOD_DELIVERY ? (
+                                                        <><span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5"><Icons.Truck className="w-3 h-3" />配送</span>{formatJpDate(order.pickupDate)} {order.pickupTime}</>
+                                                    ) : (
+                                                        <><span className="bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5"><Icons.Store className="w-3 h-3" />店頭</span>{formatJpDate(order.pickupDate)} {order.pickupTime}</>
+                                                    )}
+                                                </div>
                                                 <ul className={`text-sm font-medium space-y-1 mb-3 ${isCancelled ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
                                                     {order.itemsList && order.itemsList.map((item, idx) => (
                                                         <li key={idx}>{item.name} × {item.qty}</li>
@@ -408,6 +528,7 @@
                                                 <div className="flex justify-between items-end pt-3 border-t border-gray-200">
                                                     <span className={`font-bold ${isCancelled ? 'text-gray-500' : 'text-gray-900'}`}>
                                                         ¥{(order.totalPrice || 0).toLocaleString()}
+                                                        {order.shippingFee > 0 && <span className="text-[10px] font-normal text-gray-500 ml-1">(送料¥{order.shippingFee}込)</span>}
                                                     </span>
                                                     
                                                     <div className="flex gap-2">
@@ -454,9 +575,27 @@
                             <div className="bg-white rounded-t-2xl w-full max-w-[430px] max-h-[90vh] flex flex-col animate-slide-up">
                                 <div className="px-4 py-3 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-2xl z-10 shrink-0">
                                     <h2 className="font-bold text-base flex items-center gap-2"><Icons.ShoppingCart className="w-5 h-5" />ご注文内容</h2>
-                                    <button onClick={() => setShowConfirm(false)} className="p-1 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button>
+                                    <button onClick={() => { setShowConfirm(false); setErrorMsg(""); }} className="p-1 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button>
                                 </div>
                                 <div className="overflow-y-auto p-4 flex-1">
+                                    {/* ★受取方法の選択 */}
+                                    <label className="block text-xs font-bold text-gray-500 mb-1.5">受取方法 <span className="text-red-500">*</span></label>
+                                    <div className="grid grid-cols-2 gap-2 mb-4" role="radiogroup">
+                                        {[
+                                            { key: METHOD_PICKUP, icon: <Icons.Store className="w-5 h-5" />, title: '店頭で受け取る', sub: '送料なし' },
+                                            { key: METHOD_DELIVERY, icon: <Icons.Truck className="w-5 h-5" />, title: '配送してもらう', sub: `庄内一円・${DELIVERY.days.map(d => WEEK[d]).join('/')}曜` }
+                                        ].map(opt => {
+                                            const active = deliveryMethod === opt.key;
+                                            return (
+                                                <button key={opt.key} type="button" role="radio" aria-checked={active} onClick={() => { setDeliveryMethod(opt.key); setErrorMsg(""); }}
+                                                    className={`rounded-xl border-2 p-2.5 text-left transition-colors ${active ? 'border-nanairo-dark bg-nanairo-light' : 'border-gray-200 bg-white'}`}>
+                                                    <div className={`flex items-center gap-1.5 font-bold text-sm ${active ? 'text-nanairo-dark' : 'text-gray-700'}`}>{opt.icon}{opt.title}</div>
+                                                    <div className="text-[10px] text-gray-500 mt-0.5">{opt.sub}</div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+
                                     <div className="space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-100 mb-3">
                                         {Object.entries(cart).map(([id, qty]) => {
                                             const p = productsData.find(p => p.id === id);
@@ -470,13 +609,71 @@
                                                 </div>
                                             );
                                         })}
+                                        {isDelivery && (
+                                            <div className="pt-2 mt-1 border-t border-gray-200 space-y-1 text-sm">
+                                                <div className="flex justify-between text-gray-600"><span>商品小計</span><span>¥{cartSummary.totalPrice.toLocaleString()}</span></div>
+                                                <div className="flex justify-between text-gray-600">
+                                                    <span>配送料</span>
+                                                    <span className={cartSummary.shippingFee === 0 ? 'font-bold text-nanairo-dark' : ''}>{cartSummary.shippingFee === 0 ? '無料' : `¥${cartSummary.shippingFee.toLocaleString()}`}</span>
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="flex justify-between items-end pt-2 mt-1 border-t border-gray-200">
                                             <span className="font-bold text-gray-600 text-sm">合計 (税込)</span>
-                                            <span className="text-xl font-bold text-nanairo-dark">¥{cartSummary.totalPrice.toLocaleString()}</span>
+                                            <span className="text-xl font-bold text-nanairo-dark">¥{cartSummary.grandTotal.toLocaleString()}</span>
                                         </div>
                                     </div>
+                                    {isDelivery && cartSummary.untilFree > 0 && (
+                                        <div className="mb-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-700 font-bold flex items-center justify-between gap-2">
+                                            <span>あと¥{cartSummary.untilFree.toLocaleString()}で送料無料になります</span>
+                                            <button type="button" onClick={() => setShowConfirm(false)} className="shrink-0 underline">商品を追加</button>
+                                        </div>
+                                    )}
 
                                     <div className="space-y-3">
+                                        {isDelivery ? (
+                                        <>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">配送日 <span className="text-red-500">*</span><span className="font-normal ml-1">（{DELIVERY.time.replace('-', '〜')}頃）</span></label>
+                                            <div className="grid grid-cols-4 gap-1.5">
+                                                {deliveryDates.map(ds => {
+                                                    const active = deliveryDate === ds;
+                                                    const [, m, d] = ds.split('-').map(Number);
+                                                    return (
+                                                        <button key={ds} type="button" onClick={() => setDeliveryDate(ds)}
+                                                            className={`rounded-lg border py-2 text-center transition-colors ${active ? 'border-nanairo-dark bg-nanairo-dark text-white' : 'border-gray-300 bg-gray-50 text-gray-700'}`}>
+                                                            <div className="text-sm font-bold leading-tight">{m}/{d}</div>
+                                                            <div className={`text-[10px] ${active ? 'text-white/90' : 'text-gray-500'}`}>{WEEK[weekdayOf(ds)]}曜</div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">お届け先 <span className="text-red-500">*</span></label>
+                                            <div className="flex gap-2">
+                                                <select value={city} onChange={(e) => setCity(e.target.value)} className="w-28 shrink-0 border border-gray-300 rounded-lg p-3 text-base bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none appearance-none box-border">
+                                                    {DELIVERY.areas.map(a => <option key={a} value={a}>{a}</option>)}
+                                                </select>
+                                                <input type="text" value={addressDetail} onChange={(e) => setAddressDetail(e.target.value)} placeholder="町名・番地・建物名" autoComplete="street-address" className="min-w-0 flex-1 border border-gray-300 rounded-lg p-3 text-base bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none appearance-none box-border" />
+                                            </div>
+                                            <p className="text-[10px] text-gray-500 mt-1">配送エリア：庄内一円（{DELIVERY.areas.join('・')}）</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">電話番号 <span className="text-red-500">*</span></label>
+                                            <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="090-1234-5678" autoComplete="tel" className="block w-full border border-gray-300 rounded-lg p-3 text-base bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none appearance-none box-border" />
+                                        </div>
+                                        <div className="bg-blue-50 border border-blue-100 rounded-lg p-2.5 flex gap-2 items-start">
+                                            <Icons.Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                                            <ul className="text-[10px] text-gray-600 leading-relaxed space-y-0.5">
+                                                <li>配送日時の調整などで、<span className="font-bold">公式LINEから個別にご連絡する場合があります</span>。</li>
+                                                <li>商品合計¥{DELIVERY.freeThreshold.toLocaleString()}以上で送料無料、未満の場合は送料¥{DELIVERY.fee}（税込）です。</li>
+                                                <li>置き配のご希望などは備考欄にご記入ください。</li>
+                                            </ul>
+                                        </div>
+                                        </>
+                                        ) : (
+                                        <>
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 mb-1">ご来店予定日 <span className="text-red-500">*</span></label>
                                             {/* ★修正: min属性で過去と当日をブロックし、案内文を追加 */}
@@ -489,6 +686,8 @@
                                                 <option value="11:00-12:00">11:00 - 12:00</option><option value="12:00-13:00">12:00 - 13:00</option><option value="13:00-14:00">13:00 - 14:00</option><option value="14:00-15:00">14:00 - 15:00</option><option value="15:00-16:00">15:00 - 16:00</option><option value="16:00-17:00">16:00 - 17:00</option>
                                             </select>
                                         </div>
+                                        </>
+                                        )}
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 mb-1">備考欄 (任意)</label>
                                             <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="ご要望があればご記入ください" className="block w-full border border-gray-300 rounded-lg p-3 text-base bg-gray-50 h-20 resize-none focus:ring-2 focus:ring-nanairo-dark outline-none appearance-none box-border"></textarea>
@@ -496,19 +695,24 @@
                                     </div>
                                 </div>
                                 <div className="p-3 border-t sticky bottom-0 bg-white shrink-0 pb-safe">
+                                    {errorMsg && (
+                                        <div role="alert" className="mb-2 bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-lg p-2.5 flex gap-1.5 items-start whitespace-pre-line">
+                                            <Icons.AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{errorMsg}</span>
+                                        </div>
+                                    )}
                                     <button 
                                         onClick={handleOrderSubmit} 
-                                        disabled={!pickupDate || isSubmitting} 
+                                        disabled={!!formProblem || isSubmitting} 
                                         className={`w-full rounded-xl py-3 font-bold text-base shadow-lg transition-colors flex justify-center items-center gap-2
-                                            ${!pickupDate ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 
+                                            ${formProblem ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 
                                               isSubmitting ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-nanairo-dark text-white active:bg-green-700'}`}
                                     >
                                         {isSubmitting ? (
                                             <><div className="spinner"></div> 処理中...</>
-                                        ) : !pickupDate ? (
-                                            '来店予定日を入力してください'
+                                        ) : formProblem ? (
+                                            formProblem
                                         ) : (
-                                            'この内容で予約する'
+                                            `この内容で予約する（¥${cartSummary.grandTotal.toLocaleString()}）`
                                         )}
                                     </button>
                                 </div>
@@ -528,7 +732,7 @@
                                 </div>
                                 
                                 <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 font-medium border border-gray-200 mb-5">
-                                    <div>受取予定: {cancelTarget.pickupDate} {cancelTarget.pickupTime}</div>
+                                    <div>{cancelTarget.deliveryMethod === METHOD_DELIVERY ? '配送予定' : '受取予定'}: {formatJpDate(cancelTarget.pickupDate)} {cancelTarget.pickupTime}</div>
                                     <div className="mt-1 line-clamp-2 text-gray-500">
                                         {cancelTarget.itemsList?.map(i => `${i.name}×${i.qty}`).join(', ')}
                                     </div>
@@ -551,7 +755,19 @@
                             <div className="w-full max-w-[430px] bg-white h-full flex flex-col items-center justify-center p-6 text-center pb-safe">
                                 <div className="w-20 h-20 bg-green-100 text-nanairo-dark rounded-full flex items-center justify-center mb-6"><Icons.Check className="w-10 h-10" /></div>
                                 <h2 className="text-2xl font-bold text-gray-900 mb-2">ご注文完了しました</h2>
-                                <p className="text-gray-600 mb-2 text-sm">公式LINEへ内容を通知しました。<br/>ご来店をお待ちしております。</p>
+                                <p className="text-gray-600 mb-4 text-sm">公式LINEへ内容を通知しました。</p>
+                                {lastOrder && (
+                                    <div className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-left text-sm space-y-1.5">
+                                        <div className="flex items-center gap-1.5 font-bold text-gray-800">
+                                            {lastOrder.method === METHOD_DELIVERY ? <><Icons.Truck className="w-4 h-4 text-nanairo-dark" />配送：{formatJpDate(lastOrder.date)} {lastOrder.time.replace('-', '〜')}頃</> : <><Icons.Store className="w-4 h-4 text-nanairo-dark" />ご来店：{formatJpDate(lastOrder.date)} {lastOrder.time.replace('-', '〜')}</>}
+                                        </div>
+                                        {lastOrder.address && <div className="text-xs text-gray-600">お届け先：{lastOrder.address}</div>}
+                                        <div className="text-xs text-gray-600">お支払い合計：<span className="font-bold text-gray-900">¥{Number(lastOrder.total).toLocaleString()}</span></div>
+                                    </div>
+                                )}
+                                <p className="text-gray-500 mt-4 text-xs leading-relaxed">
+                                    {lastOrder && lastOrder.method === METHOD_DELIVERY ? <>配送日時の調整などで、公式LINEから<br/>個別にご連絡する場合があります。</> : 'ご来店をお待ちしております。'}
+                                </p>
                                 <button onClick={closeApp} className="w-full bg-gray-800 text-white rounded-xl py-4 font-bold text-lg active:bg-gray-900 mt-8">トーク画面に戻る</button>
                             </div>
                         </div>

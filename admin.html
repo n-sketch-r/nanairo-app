@@ -85,6 +85,8 @@
             X: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
             Award: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>,
             History: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>,
+            MapPin: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>,
+            Phone: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
             Truck: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/><path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>,
             Store: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/></svg>,
             XCircle: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>,
@@ -141,7 +143,7 @@
             const [cancelInventoryTarget, setCancelInventoryTarget] = useState(null);
 
             // 期間フィルター
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = new Date(Date.now() + 9 * 3600 * 1000).toISOString().split('T')[0]; // ★日本時間
             const todayMonth = todayStr.slice(0, 7);
             const [viewStartMonth, setViewStartMonth] = useState(todayMonth);
             const [viewEndMonth, setViewEndMonth] = useState(todayMonth);
@@ -403,14 +405,15 @@
 
             const renderPrintView = () => {
                 if(printOrders.length === 0) return null;
-                const todayText = toWareki(new Date().toISOString().split('T')[0]);
+                const todayText = toWareki(new Date(Date.now() + 9 * 3600 * 1000).toISOString().split('T')[0]);
 
                 if (printType === 'monthly_report') {
                     const customer = printOrders[0] || {};
                     const filteredOrders = (customer.detailedOrders || []).filter(item => item.date >= reportStartDate && item.date <= reportEndDate);
-                    const totalQty = filteredOrders.reduce((acc, curr) => acc + Number(curr.qty || 0), 0);
+                    const totalQty = filteredOrders.filter(i => !i.isShipping).reduce((acc, curr) => acc + Number(curr.qty || 0), 0);
+                    const shippingTotal = filteredOrders.filter(i => i.isShipping).reduce((acc, curr) => acc + Number(curr.unitPrice || 0), 0);
                     const currentTotalSpend = filteredOrders.reduce((acc, curr) => {
-                        const p = products.find(p => p.name === curr.name); return acc + ((p ? Number(p.price) : 0) * Number(curr.qty || 0));
+                        const p = products.find(p => p.name === curr.name); const up = curr.unitPrice != null ? Number(curr.unitPrice) : (p ? Number(p.price) : 0); return acc + (up * Number(curr.qty || 0));
                     }, 0);
                     return (
                         <div className="fixed inset-0 z-[100] bg-gray-100 flex flex-col print-area h-screen overflow-y-auto">
@@ -452,12 +455,12 @@
                                         <thead className="bg-gray-100 font-bold"><tr><th className="border border-gray-400 p-2 text-center w-20">納品日</th><th className="border border-gray-400 p-2">商品名</th><th className="border border-gray-400 p-2 text-right w-16">個数</th><th className="border border-gray-400 p-2 text-right w-24">単価</th><th className="border border-gray-400 p-2 text-right w-28">売上額(税込)</th></tr></thead>
                                         <tbody>
                                             {filteredOrders.map((item, i) => {
-                                                const p = products.find(p => p.name === item.name); const up = p ? Number(p.price) : 0;
-                                                return (<tr key={i} className="hover:bg-gray-50"><td className="border border-gray-400 p-2 text-center">{toWareki(item.date)}</td><td className="border border-gray-400 p-2 font-bold">{item.name}</td><td className="border border-gray-400 p-2 text-right">{item.qty} P</td><td className="border border-gray-400 p-2 text-right">¥{up.toLocaleString()}</td><td className="border border-gray-400 p-2 text-right font-bold">¥{(up * Number(item.qty)).toLocaleString()}</td></tr>);
+                                                const p = products.find(p => p.name === item.name); const up = item.unitPrice != null ? Number(item.unitPrice) : (p ? Number(p.price) : 0);
+                                                return (<tr key={i} className="hover:bg-gray-50"><td className="border border-gray-400 p-2 text-center">{toWareki(item.date)}</td><td className="border border-gray-400 p-2 font-bold">{item.name}</td><td className="border border-gray-400 p-2 text-right">{item.qty}{item.isShipping ? '' : ' P'}</td><td className="border border-gray-400 p-2 text-right">¥{up.toLocaleString()}</td><td className="border border-gray-400 p-2 text-right font-bold">¥{(up * Number(item.qty)).toLocaleString()}</td></tr>);
                                             })}
                                             {[...Array(Math.max(0, 12 - filteredOrders.length))].map((_, i) => (<tr key={`empty-${i}`}><td className="border border-gray-400 p-2 text-center">&nbsp;</td><td className="border border-gray-400 p-2"></td><td className="border border-gray-400 p-2"></td><td className="border border-gray-400 p-2"></td><td className="border border-gray-400 p-2"></td></tr>))}
                                         </tbody>
-                                        <tfoot className="font-bold bg-gray-50"><tr><td colSpan="2" className="border border-gray-400 p-2 text-center text-[10px] text-gray-500 font-normal">内訳: 消費税等(8%対象)を含む</td><td className="border border-gray-400 p-2 text-right">{totalQty} P</td><td className="border border-gray-400 p-2 text-right">売上合計</td><td className="border border-gray-400 p-2 text-right text-sm">¥{Number(currentTotalSpend || 0).toLocaleString()}</td></tr></tfoot>
+                                        <tfoot className="font-bold bg-gray-50"><tr><td colSpan="2" className="border border-gray-400 p-2 text-center text-[10px] text-gray-500 font-normal">{shippingTotal > 0 ? `内訳: 8%対象 ¥${(currentTotalSpend - shippingTotal).toLocaleString()} ／ 10%対象(配送料) ¥${shippingTotal.toLocaleString()}` : '内訳: 消費税等(8%対象)を含む'}</td><td className="border border-gray-400 p-2 text-right">{totalQty} P</td><td className="border border-gray-400 p-2 text-right">売上合計</td><td className="border border-gray-400 p-2 text-right text-sm">¥{Number(currentTotalSpend || 0).toLocaleString()}</td></tr></tfoot>
                                     </table>
                                     <div className="absolute bottom-10 left-12 right-12 text-center text-[10px] text-gray-400 border-t border-gray-200 pt-3">いつも新鮮ななないろ菜・マイクロハーブをご利用いただき、誠にありがとうございます。</div>
                                 </div>
@@ -543,7 +546,7 @@
                                         {printType === 'receipt' ? (
                                             <div className="mb-12">
                                                 <div className="flex items-end gap-4 mb-4 border-b border-gray-400 pb-2"><span className="text-gray-600 font-bold">金額</span><span className="text-4xl font-bold">¥{Number(order.totalPrice || 0).toLocaleString()} <span className="text-lg">-</span></span></div>
-                                                <div className="text-gray-600">但 マイクロハーブ代として 上記正に領収いたしました。</div>
+                                                <div className="text-gray-600">但 マイクロハーブ代{Number(order.shippingFee || 0) > 0 ? '（配送料を含む）' : ''}として 上記正に領収いたしました。</div>
                                             </div>
                                         ) : (
                                             <div className="mb-10">
@@ -556,10 +559,23 @@
                                             <tbody>
                                                 {order.itemsList && order.itemsList.map((item, i) => {
                                                     const p = products.find(p => p.name === item.name); const up = p ? Number(p.price) : 0;
-                                                    return (<tr key={i}><td className="border border-gray-300 p-2 text-center">{i + 1}</td><td className="border border-gray-300 p-2 font-bold">{item.name}</td><td className="border border-gray-300 p-2 text-right">{item.qty} P</td><td className="border border-gray-300 p-2 text-right">¥{up.toLocaleString()}</td><td className="border border-gray-300 p-2 text-right">¥{(up * Number(item.qty)).toLocaleString()}</td></tr>)
+                                                    return (<tr key={i}><td className="border border-gray-300 p-2 text-center">{i + 1}</td><td className="border border-gray-300 p-2 font-bold">{item.name} <span className="text-[10px] font-normal text-gray-500">※</span></td><td className="border border-gray-300 p-2 text-right">{item.qty} P</td><td className="border border-gray-300 p-2 text-right">¥{up.toLocaleString()}</td><td className="border border-gray-300 p-2 text-right">¥{(up * Number(item.qty)).toLocaleString()}</td></tr>)
                                                 })}
+                                                {Number(order.shippingFee || 0) > 0 && (
+                                                    <tr><td className="border border-gray-300 p-2 text-center">{(order.itemsList ? order.itemsList.length : 0) + 1}</td><td className="border border-gray-300 p-2 font-bold">配送料</td><td className="border border-gray-300 p-2 text-right">1</td><td className="border border-gray-300 p-2 text-right">¥{Number(order.shippingFee).toLocaleString()}</td><td className="border border-gray-300 p-2 text-right">¥{Number(order.shippingFee).toLocaleString()}</td></tr>
+                                                )}
                                             </tbody>
                                         </table>
+                                        {(() => {
+                                            const ship = Number(order.shippingFee || 0);
+                                            const food = Number(order.totalPrice || 0) - ship;
+                                            return (
+                                                <div className="mt-3 ml-auto w-72 text-xs text-gray-700 border border-gray-300 rounded p-2 space-y-0.5">
+                                                    <div className="flex justify-between"><span>※ 8%対象（軽減税率）</span><span>¥{food.toLocaleString()}（内消費税 ¥{Math.floor(food * 8 / 108).toLocaleString()}）</span></div>
+                                                    {ship > 0 && <div className="flex justify-between"><span>10%対象</span><span>¥{ship.toLocaleString()}（内消費税 ¥{Math.floor(ship * 10 / 110).toLocaleString()}）</span></div>}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 );
                             })}
@@ -608,11 +624,16 @@
                                                 <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-3">
                                                     <div>
                                                         <div className="font-bold text-gray-800 text-lg flex items-center gap-2">{order.userName} 様</div>
-                                                        <div className="text-sm text-nanairo-dark font-bold mt-1 flex items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 受取: {order.pickupDate} {order.pickupTime}</div>
+                                                        {order.deliveryMethod === '配送' ? (
+                                                            <div className="text-sm text-blue-600 font-bold mt-1 flex items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {order.pickupDate} {order.pickupTime}</div>
+                                                        ) : (
+                                                            <div className="text-sm text-nanairo-dark font-bold mt-1 flex items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 店頭受取: {order.pickupDate} {order.pickupTime}</div>
+                                                        )}
                                                     </div>
                                                     <div className="text-right">
                                                         <div className="text-sm text-gray-500 mb-0.5">合計金額</div>
                                                         <div className="font-bold text-xl text-gray-900">¥{Number(order.totalPrice || 0).toLocaleString()}</div>
+                                                        {order.deliveryMethod === '配送' && <div className="text-[10px] text-gray-500">{order.shippingFee > 0 ? `送料¥${order.shippingFee}込` : '送料無料'}</div>}
                                                     </div>
                                                 </div>
                                                 <div className="mb-4">
@@ -623,6 +644,12 @@
                                                         ))}
                                                     </div>
                                                 </div>
+                                                {order.deliveryMethod === '配送' && (
+                                                    <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg mb-3 text-xs text-blue-900 space-y-1.5">
+                                                        <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent('山形県' + order.address)}`} target="_blank" rel="noopener" className="flex gap-1.5 items-start font-bold underline decoration-blue-300"><Icons.MapPin className="w-4 h-4 shrink-0"/>{order.address || '（住所未入力）'}</a>
+                                                        {order.phone && <a href={`tel:${order.phone}`} className="flex gap-1.5 items-center font-bold"><Icons.Phone className="w-4 h-4 shrink-0"/>{order.phone}</a>}
+                                                    </div>
+                                                )}
                                                 {order.memo && order.memo !== "なし" && (
                                                     <div className="bg-yellow-50 border border-yellow-200 p-2.5 rounded-lg mb-4 text-xs text-yellow-800 flex gap-1.5 items-start"><Icons.ClipboardList className="w-4 h-4 shrink-0 mt-0.5"/><span>{order.memo}</span></div>
                                                 )}
@@ -639,7 +666,7 @@
                                                         <button type="button" onClick={() => openPrintPreview(order, 'invoice')} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg text-[11px] font-bold text-gray-600 active:bg-gray-100 flex items-center justify-center gap-1 h-10 shadow-sm"><Icons.FileText className="w-3.5 h-3.5"/>納品書</button>
                                                         <button type="button" onClick={() => openPrintPreview(order, 'receipt')} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg text-[11px] font-bold text-gray-600 active:bg-gray-100 flex items-center justify-center gap-1 h-10 shadow-sm"><Icons.FileText className="w-3.5 h-3.5"/>領収書</button>
                                                     </div>
-                                                    <button type="button" onClick={() => toggleOrderStatus(order.id, order.status)} className={`flex-[1.5] h-10 rounded-lg font-bold text-sm transition-colors shadow-sm ${order.status === '未対応' ? 'bg-nanairo-light text-nanairo-dark border border-nanairo hover:bg-green-100' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>{order.status === '未対応' ? '準備完了にする' : '受渡済にする'}</button>
+                                                    <button type="button" onClick={() => toggleOrderStatus(order.id, order.status)} className={`flex-[1.5] h-10 rounded-lg font-bold text-sm transition-colors shadow-sm ${order.status === '未対応' ? 'bg-nanairo-light text-nanairo-dark border border-nanairo hover:bg-green-100' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>{order.status === '未対応' ? '準備完了にする' : (order.deliveryMethod === '配送' ? '配達済にする' : '受渡済にする')}</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -662,7 +689,7 @@
                                                 <div key={order.id} className={`bg-white border p-3 rounded-lg shadow-sm ${isCancelled ? 'border-gray-300 opacity-60' : 'border-gray-200'}`}>
                                                     <div className="flex justify-between items-center opacity-80 mb-2">
                                                         <div>
-                                                            <div className="font-bold text-gray-700 text-sm mb-1 flex items-center gap-1">{isCancelled && <Icons.XCircle className="w-4 h-4 text-red-500" />}{order.userName} 様 <span className="text-xs font-normal text-gray-400 ml-1">({order.orderDate})</span></div>
+                                                            <div className="font-bold text-gray-700 text-sm mb-1 flex items-center gap-1">{isCancelled && <Icons.XCircle className="w-4 h-4 text-red-500" />}{order.deliveryMethod === '配送' && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1 py-0.5 rounded font-bold">配送</span>}{order.userName} 様 <span className="text-xs font-normal text-gray-400 ml-1">({order.orderDate})</span></div>
                                                             <div className="text-xs text-gray-500 mb-1.5">{order.itemsList && order.itemsList.map(i => `${i.name}×${i.qty}`).join(', ')}</div>
                                                             <div className="flex gap-1">{order.senmuChecked && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded font-bold">専務確認済</span>}{order.cafeChecked && <span className="text-[9px] bg-orange-50 text-orange-600 border border-orange-200 px-1.5 py-0.5 rounded font-bold">カフェ確認済</span>}</div>
                                                         </div>
