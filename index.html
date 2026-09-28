@@ -491,7 +491,7 @@
             };
 
             return (
-                <div className="app-container pb-14">
+                <div className="app-container" style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom))' }}>
                     
                     <header className="sticky top-0 z-20 bg-nanairo-light px-4 py-3 flex justify-between items-center shadow-sm">
                         <div className="flex items-center gap-2">
@@ -662,7 +662,7 @@
                     </main>
 
                     {cartSummary.totalItems > 0 && !showConfirm && !showComplete && (
-                        <div className="fixed bottom-14 left-0 right-0 mx-auto w-full max-w-[430px] px-4 py-3 z-30 animate-slide-up pb-safe box-border">
+                        <div className="fixed left-0 right-0 mx-auto w-full max-w-[430px] px-4 py-3 z-30 animate-slide-up box-border" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom))' }}>
                             <button onClick={() => setShowConfirm(true)} className="w-full bg-[#759fbf] text-white rounded-xl py-3 px-4 flex justify-between items-center font-bold shadow-lg active:bg-[#5c809a] transition-colors">
                                 <div className="flex items-center gap-2"><Icons.ShoppingCart className="w-5 h-5" /><span>カートを確認する</span></div>
                                 <div className="flex items-center gap-3"><span className="text-sm font-normal">{cartSummary.totalItems}点</span><span className="text-lg">¥{cartSummary.totalPrice.toLocaleString()}</span></div>
@@ -670,7 +670,7 @@
                         </div>
                     )}
 
-                    <div className="fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[430px] bg-white border-t border-gray-200 flex h-14 z-20 pb-safe box-border">
+                    <div className="fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[430px] bg-white border-t border-gray-200 flex z-20 box-border" style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}>
                         <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'home' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
                             <Icons.Store className="w-5 h-5" />
                             <span className="text-[10px] font-bold">ショップ</span>
