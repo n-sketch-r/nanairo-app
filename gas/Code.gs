@@ -243,7 +243,7 @@ function doPost(e) {
   const action = data.action || "order";
   const ADMIN_ACTIONS = ["getAdminData", "stockUpdate", "bulkLoss", "cancelStockLog", "statusUpdate", "toggleCheck",
     "agencyDelivery", "agencyInventory", "cancelAgencyDelivery", "cancelAgencyInventory", "checkAdmin"];
-  const CUSTOMER_ACTIONS = ["order", "cancelOrder", "getUserOrders"];
+  const CUSTOMER_ACTIONS = ["order", "cancelOrder", "getUserOrders", "getProfile", "saveProfile"];
 
   // --- 認証 ---
   let verified = false;
@@ -263,6 +263,10 @@ function doPost(e) {
   try {
     if (action === "checkAdmin") return jsonOut({ status: "success" });
     if (action === "getAdminData") return jsonOut(buildAdminData(data));
+    if (action === "getProfile") {
+      // 本人確認が取れたときだけ登録情報を返す
+      return jsonOut({ status: "success", profile: verified && data.userId ? findCustomer(data.userId) : null });
+    }
     if (action === "getUserOrders") {
       if (!data.userId) return jsonOut([]);
       const mine = fetchOrders().filter(o => o.userId === data.userId);
@@ -289,6 +293,7 @@ function doPost(e) {
 
   try {
     if (action === "order") response = Object.assign(response, processNewOrder(data));
+    else if (action === "saveProfile") response.profile = saveCustomer(data, verified);
     else if (action === "stockUpdate") processStockAdjustment(data);
     else if (action === "bulkLoss") processBulkLoss(data);
     else if (action === "cancelStockLog") processCancelStockLog(data);
@@ -750,6 +755,13 @@ function processNewOrder(data) {
   const storeName = String(data.storeName || "").trim().slice(0, 50);
   const orderId = newOrderId();
 
+  // ★初回登録の情報（フルネーム・電話番号）があれば、LINEの表示名の代わりに使う
+  const profile = findCustomer(data.userId);
+  if (profile) {
+    data.userName = profile.fullName;
+    if (!phone && profile.phone) phone = profile.phone; // 店頭受取でも連絡先を残す
+  }
+
   // --- 4. 書き込み ---
   SHEET_ORDERS.appendRow([
     data.userName,
@@ -804,6 +816,71 @@ function processNewOrder(data) {
 
 function weekdayLabel(dateStr) {
   return ["日", "月", "火", "水", "木", "金", "土"][weekdayOf(dateStr)];
+}
+
+/* ===== ★お客様の登録情報（初回だけ入力：フルネーム・電話番号・店舗名） ===== */
+// Customers シート：A LINEユーザーID / B お名前 / C 電話番号 / D 店舗名 / E 登録日時 / F 更新日時
+function customerSheet() {
+  let sh = SS.getSheetByName("Customers");
+  if (!sh) {
+    sh = SS.insertSheet("Customers");
+    sh.getRange(1, 1, 1, 6).setValues([["LINEユーザーID", "お名前", "電話番号", "店舗名", "登録日時", "更新日時"]]);
+    sh.getRange("C:C").setNumberFormat("@"); // 電話番号の先頭の0を消さない
+  }
+  return sh;
+}
+
+function findCustomer(userId) {
+  if (!userId) return null;
+  const values = customerSheet().getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(userId)) {
+      return { fullName: String(values[i][1] || ""), phone: String(values[i][2] || ""), storeName: String(values[i][3] || "") };
+    }
+  }
+  return null;
+}
+
+function saveCustomer(data, verified) {
+  if (!verified || !data.userId) throw new Error("LINEアプリから開き直してください（本人確認ができませんでした）。");
+  const fullName = String(data.fullName || "").trim().slice(0, 30);
+  const phone = String(data.phone || "").replace(/[^\d-]/g, "");
+  const storeName = String(data.storeName || "").trim().slice(0, 50);
+  if (!fullName) throw new Error("お名前を入力してください。");
+  if (phone.replace(/-/g, "").length < 10) throw new Error("電話番号を正しく入力してください。");
+
+  const sh = customerSheet();
+  const values = sh.getDataRange().getValues();
+  const now = new Date();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(data.userId)) {
+      sh.getRange(i + 1, 2, 1, 3).setValues([[fullName, phone, storeName]]);
+      sh.getRange(i + 1, 6).setValue(now);
+      return { fullName: fullName, phone: phone, storeName: storeName };
+    }
+  }
+  sh.appendRow([data.userId, fullName, phone, storeName, now, now]);
+  return { fullName: fullName, phone: phone, storeName: storeName };
+}
+
+/* ===== ★お客様への前日リマインド（毎日17時） ===== */
+function sendCustomerReminders() {
+  const tomorrow = Utilities.formatDate(new Date(Date.now() + 86400000), "Asia/Tokyo", "yyyy-MM-dd");
+  fetchOrders().filter(o => o.pickupDate === tomorrow && (o.status === "未対応" || o.status === "準備完了") && o.userId).forEach(o => {
+    const isDelivery = o.deliveryMethod === METHOD_DELIVERY;
+    const items = o.itemsList.map(it => `・${it.name} × ${it.qty}`).join("\n");
+    const msg = isDelivery
+      ? `${o.userName}様\n\n明日、ご注文の商品をお届けします🚚\n\n📅 ${jpDate(o.pickupDate)} ${timeLabel(o.pickupTime)}頃\n🏠 ${o.address}\n\n${items}\n\n💴 お支払い：¥${o.totalPrice.toLocaleString()}（配達時に現金）\n\nご不在になる場合は、このトークでお知らせください。`
+      : `${o.userName}様\n\n明日はご注文の受け取り日です🌱\n\n📅 ${jpDate(o.pickupDate)} ${timeLabel(o.pickupTime)}\n\n${items}\n\n💴 お支払い：¥${o.totalPrice.toLocaleString()}（お受け取り時に現金）\n\nご都合が悪くなった場合は、このトークでお知らせください。ご来店をお待ちしております。`;
+    pushLine(o.userId, msg);
+  });
+}
+
+// ★初回だけエディタから実行：前日リマインドを毎日17時に送る設定
+function setupReminderTrigger() {
+  ScriptApp.getProjectTriggers().forEach(t => { if (t.getHandlerFunction() === "sendCustomerReminders") ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("sendCustomerReminders").timeBased().everyDays(1).atHour(17).inTimezone("Asia/Tokyo").create();
+  Logger.log("前日リマインドを毎日17時に送る設定をしました");
 }
 
 /* ===== ★通知文の部品 ===== */
