@@ -470,11 +470,11 @@
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <label className="font-bold text-gray-600 whitespace-nowrap">対象期間:</label>
-                                        <input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="border border-gray-300 rounded p-1 bg-white" /><span className="text-gray-400">〜</span><input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="border border-gray-300 rounded p-1 bg-white" />
+                                        <input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="min-w-0 appearance-none border border-gray-300 rounded p-1 bg-white" /><span className="text-gray-400">〜</span><input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="min-w-0 appearance-none border border-gray-300 rounded p-1 bg-white" />
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <label className="font-bold text-gray-600 whitespace-nowrap">請求締日:</label>
-                                        <input type="date" value={reportClosingDate} onChange={e => setReportClosingDate(e.target.value)} className="border border-gray-300 rounded p-1 bg-white" />
+                                        <input type="date" value={reportClosingDate} onChange={e => setReportClosingDate(e.target.value)} className="min-w-0 appearance-none border border-gray-300 rounded p-1 bg-white" />
                                     </div>
                                     {filteredOrders.length === 0 && <div className="text-red-500 font-bold ml-auto animate-pulse">※指定期間内にデータがありません</div>}
                                 </div>
@@ -874,7 +874,7 @@
                                     </div>
                                     <div className="w-full sm:flex-[1]">
                                         <label className="block text-sm font-bold text-gray-700 mb-1">納品日</label>
-                                        <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-agency outline-none font-bold" />
+                                        <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className="block w-full min-w-0 max-w-full box-border appearance-none border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-agency outline-none font-bold" />
                                     </div>
                                 </div>
                                 {selectedAgencyId && (

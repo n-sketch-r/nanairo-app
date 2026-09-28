@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>なないろ菜・マイクロハーブ 発注システム</title>
     <link rel="apple-touch-icon" href="icon.png">
     
@@ -619,7 +619,7 @@
 
                     {showConfirm && (
                         <div className="fixed inset-0 bg-black/50 z-40 flex flex-col justify-end items-center">
-                            <div className="bg-white rounded-t-2xl w-full max-w-[430px] max-h-[90vh] flex flex-col animate-slide-up">
+                            <div className="bg-white rounded-t-2xl w-full max-w-[430px] max-h-[90vh] max-h-[90dvh] flex flex-col animate-slide-up">
                                 <div className="px-4 py-3 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-2xl z-10 shrink-0">
                                     <h2 className="font-bold text-base flex items-center gap-2"><Icons.ShoppingCart className="w-5 h-5" />ご注文内容</h2>
                                     <button onClick={() => { setShowConfirm(false); setErrorMsg(""); }} className="p-1 bg-gray-100 rounded-full"><Icons.X className="w-5 h-5" /></button>
@@ -753,7 +753,7 @@
                                         </p>
                                     </div>
                                 </div>
-                                <div className="p-3 border-t sticky bottom-0 bg-white shrink-0 pb-safe">
+                                <div className="p-3 border-t sticky bottom-0 bg-white shrink-0" style={{ paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
                                     {errorMsg && (
                                         <div role="alert" className="mb-2 bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-lg p-2.5 flex gap-1.5 items-start whitespace-pre-line">
                                             <Icons.AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{errorMsg}</span>

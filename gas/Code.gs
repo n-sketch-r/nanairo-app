@@ -27,7 +27,7 @@ const ADMIN_PASSWORD_SHA256 = String(PROPS.getProperty("ADMIN_PASSWORD_SHA256") 
 // LINEログインのチャネルID（LIFF ID の「-」より前の数字）
 const LINE_LOGIN_CHANNEL_ID = "2010021938";
 // true にすると、LINEの本人確認（IDトークン）が無い注文・キャンセル・履歴取得を拒否します
-const REQUIRE_LINE_ID_TOKEN = false; // ← 動作確認後に true へ（スクリプト プロパティの IDTOKEN_OK_AT で確認）
+const REQUIRE_LINE_ID_TOKEN = true; // 2026-09-28 本人確認の動作を確認済み（false に戻すと移行モード）
 
 // エディタから実行して、秘密の値が設定されているか確認する（値そのものはログに出さない）
 function checkSettings() {
@@ -786,11 +786,16 @@ function processNewOrder(data) {
 
   if (LINE_GROUP_ID) {
     const isDelivery = method === METHOD_DELIVERY;
-    const head = isDelivery ? "🚚 【新規注文（配送）】" : "🔔 【新規注文（店頭受取）】";
-    const when = isDelivery ? `🚚 配送: ${pickupDate}(${weekdayLabel(pickupDate)}) ${pickupTime}\n🏠 ${address}\n📞 ${phone}` : `📅 受取: ${pickupDate}(${weekdayLabel(pickupDate)}) ${pickupTime}`;
-    const fee = isDelivery ? `\n🚚 配送料: ${shippingFee === 0 ? '無料' : '¥' + shippingFee.toLocaleString()}` : "";
-    const who = storeName ? `🏪 ${storeName}（${data.userName} 様）` : `👤 お客様: ${data.userName} 様`;
-    const groupMsg = `${head}\n\n${who}\n${when}\n\n📝 内容:\n${order.orderItems}\n\n💬 備考: ${memo}${fee}\n💰 合計: ¥${totalPrice.toLocaleString()}`;
+    const head = isDelivery ? "🚚【新規注文・配送】" : "🔔【新規注文・店頭受取】";
+    const who = storeName ? `🏪 ${storeName}（${data.userName} 様）` : `👤 ${data.userName} 様`;
+    const when = isDelivery
+      ? `📅 ${jpDate(pickupDate)} ${timeLabel(pickupTime)}頃\n🏠 ${address}\n📞 ${phone}`
+      : `📅 ${jpDate(pickupDate)} ${timeLabel(pickupTime)}`;
+    const money = isDelivery
+      ? `💰 ¥${totalPrice.toLocaleString()}（送料${shippingFee === 0 ? '無料' : '¥' + shippingFee.toLocaleString()}込）`
+      : `💰 ¥${totalPrice.toLocaleString()}`;
+    const memoLine = memo && memo !== "なし" ? `\n💬 ${memo}` : "";
+    const groupMsg = `${head}\n${who}\n${when}\n\n${itemLines(order.orderItems)}\n\n${money}${memoLine}\n\n▶ 管理画面\n${ADMIN_URL}`;
     pushLineMessageToGroup(groupMsg);
   }
 
@@ -799,6 +804,32 @@ function processNewOrder(data) {
 
 function weekdayLabel(dateStr) {
   return ["日", "月", "火", "水", "木", "金", "土"][weekdayOf(dateStr)];
+}
+
+/* ===== ★通知文の部品 ===== */
+const ADMIN_URL = "https://n-sketch-r.github.io/nanairo-app/admin.html";
+
+// "2026-09-29" → "9月29日(火)"
+function jpDate(dateStr) {
+  const p = String(dateStr).split("-").map(Number);
+  if (p.length !== 3 || !p[1]) return String(dateStr);
+  return `${p[1]}月${p[2]}日(${weekdayLabel(dateStr)})`;
+}
+
+// 前日の yyyy-MM-dd
+function prevDay(dateStr) {
+  const p = String(dateStr).split("-").map(Number);
+  return Utilities.formatDate(new Date(Date.UTC(p[0], p[1] - 1, p[2] - 1)), "UTC", "yyyy-MM-dd");
+}
+
+// "11:00-12:00" → "11:00〜12:00"
+function timeLabel(t) {
+  return String(t || "").replace("-", "〜");
+}
+
+// "ロケット × 2\nデトロイト × 1" → "・ロケット × 2\n・デトロイト × 1"
+function itemLines(itemsStr) {
+  return String(itemsStr || "").split("\n").filter(s => s.trim()).map(s => "・" + s.trim()).join("\n");
 }
 
 function processCancelOrder(data) {
@@ -835,7 +866,9 @@ function processCancelOrder(data) {
   sendLineCancelNotification(userName, data.userId, pickupDate, pickupTime, itemsStr, methodLabel);
 
   if (LINE_GROUP_ID) {
-    const cancelMsg = `❌ 【注文キャンセル（${methodLabel}）】\n${userName}様から以下の注文キャンセルがありました。\n（在庫は自動で元に戻りました）\n\n📅 予定: ${pickupDate} ${pickupTime}\n📝 ${itemsStr}`;
+    const storeName = String(row[COL_ORD_STORE] || "");
+    const who = storeName ? `🏪 ${storeName}（${userName} 様）` : `👤 ${userName} 様`;
+    const cancelMsg = `❌【キャンセル・${methodLabel === "配送" ? "配送" : "店頭受取"}】\n${who}\n📅 ${jpDate(pickupDate)} ${timeLabel(pickupTime)}\n\n${itemLines(itemsStr)}\n\n※在庫は自動で戻しました。準備済みの分があれば店頭在庫に回してください。`;
     pushLineMessageToGroup(cancelMsg);
   }
 }
@@ -950,17 +983,23 @@ function pushLine(to, text) {
 }
 
 function sendLineNotification(data) {
-  let msg;
-  if (data.method === METHOD_DELIVERY) {
-    msg = `${data.userName}様\n\nご注文ありがとうございます！\n\n🚚 配送予定: ${data.pickupDate}(${weekdayLabel(data.pickupDate)}) ${data.pickupTime}頃\n🏠 お届け先: ${data.address}\n\n内容:\n${data.orderItems}\n\n商品小計: ¥${data.subtotal.toLocaleString()}\n配送料: ${data.shippingFee === 0 ? '無料' : '¥' + data.shippingFee.toLocaleString()}\n合計: ¥${data.totalPrice.toLocaleString()}\n\n💴 お支払い: 配達時に現金でお願いいたします。\n\n※配送日時の調整などで、こちらの公式LINEから個別にご連絡する場合がございます。`;
-  } else {
-    msg = `${data.userName}様\n\nご注文ありがとうございます！\n受取: ${data.pickupDate}(${weekdayLabel(data.pickupDate)}) ${data.pickupTime}\n\n内容:\n${data.orderItems}\n\n合計: ¥${Number(data.totalPrice).toLocaleString()}\n💴 お支払い: お受け取り時に現金でお願いいたします。\n\nご来店をお待ちしております。`;
-  }
+  const isDelivery = data.method === METHOD_DELIVERY;
+  const deadline = `${jpDate(prevDay(data.pickupDate))} 23:59`;
+  const body = isDelivery
+    ? `🚚 お届け日時\n${jpDate(data.pickupDate)} ${timeLabel(data.pickupTime)}頃\n\n🏠 お届け先\n${data.storeName ? data.storeName + "\n" : ""}${data.address}`
+    : `📅 お受け取り日時\n${jpDate(data.pickupDate)} ${timeLabel(data.pickupTime)}\n店頭にてお渡しします。`;
+  const money = isDelivery
+    ? `商品小計　¥${data.subtotal.toLocaleString()}\n送料　　　${data.shippingFee === 0 ? '無料' : '¥' + data.shippingFee.toLocaleString()}\n合計　　　¥${data.totalPrice.toLocaleString()}（税込）`
+    : `合計　¥${data.totalPrice.toLocaleString()}（税込）`;
+  const pay = isDelivery ? "配達時に現金でお支払いください。" : "お受け取り時に現金でお支払いください。";
+  const msg = `${data.userName}様\n\nご注文ありがとうございます🌱\n以下の内容で承りました。\n\n${body}\n\n🛒 ご注文内容\n${itemLines(data.orderItems)}\n\n${money}\n💴 ${pay}\n\n――――――――――\nキャンセルは ${deadline} まで、注文画面の「履歴・キャンセル」からできます。それ以降の変更は、このトークでお知らせください。${isDelivery ? "\n\n配送日時の調整などで、このトークからご連絡する場合があります。" : "\n\nご来店をお待ちしております。"}`;
   pushLine(data.userId, msg);
 }
 
+
 function sendLineCancelNotification(userName, userId, pickupDate, pickupTime, orderItems, methodLabel) {
-  const msg = `${userName}様\n\nご注文のキャンセルを承りました。\n\n[キャンセル内容]\n${methodLabel || '受取'}: ${pickupDate} ${pickupTime}\n${orderItems}\n\nまたのご利用をお待ちしております。`;
+  const label = methodLabel === "配送" ? "お届け予定" : "お受け取り予定";
+  const msg = `${userName}様\n\n下記のご注文のキャンセルを承りました。\n\n📅 ${label}\n${jpDate(pickupDate)} ${timeLabel(pickupTime)}\n\n${itemLines(orderItems)}\n\nまたのご利用をお待ちしております🌱`;
   pushLine(userId, msg);
 }
 
