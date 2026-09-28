@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>【管理者用】なないろ菜 ダッシュボード</title>
     
-    <link rel="apple-touch-icon" href="https://i.imgur.com/tqZC8OZ.png">
-    <link rel="icon" type="image/png" href="https://i.imgur.com/tqZC8OZ.png">
+    <link rel="apple-touch-icon" href="images/logo.png">
+    <link rel="icon" type="image/png" href="images/logo.png">
     
     <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
@@ -18,7 +18,8 @@
             theme: {
                 extend: {
                     colors: {
-                        'nanairo': { light: '#e6f4ea', DEFAULT: '#4ade80', dark: '#16a34a' },
+                        // ★ロゴ（カメレオン）の色にそろえる
+                        'nanairo': { light: '#EEF5E1', DEFAULT: '#8DC63F', dark: '#0F9A44' },
                         'nanairo-accent': '#f97316',
                         'agency': { light: '#fff7ed', DEFAULT: '#f97316', dark: '#c2410c' },
                         'line': '#06C755'
@@ -40,6 +41,7 @@
         .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
         .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .rainbow { height: 3px; background: linear-gradient(90deg,#E8412F,#F7931E,#FDD835,#4CB848,#00AEEF,#0F75BC,#A0569F); }
 
         /* 印刷用スタイル */
         @media print {
@@ -337,8 +339,8 @@
 
             // ★受取日が今日・明日なら目立つラベルを出す
             const tomorrowStr = new Date(Date.now() + 33 * 3600 * 1000).toISOString().split('T')[0];
-            const dayBadge = (date) => date === todayStr ? <span className="ml-1 text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded">今日</span>
-                : date === tomorrowStr ? <span className="ml-1 text-[10px] font-bold bg-orange-400 text-white px-1.5 py-0.5 rounded">明日</span> : null;
+            const dayBadge = (date) => date === todayStr ? <span className="ml-1 shrink-0 whitespace-nowrap text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded">今日</span>
+                : date === tomorrowStr ? <span className="ml-1 shrink-0 whitespace-nowrap text-[10px] font-bold bg-orange-400 text-white px-1.5 py-0.5 rounded">明日</span> : null;
 
             const openBulkPrintPreview = (type) => {
                 const printableOrders = orders.filter(o => o.status !== 'キャンセル' && inViewPeriod(o));
@@ -465,7 +467,7 @@
                             <div className="no-print bg-white shadow-md p-4 flex flex-col items-stretch gap-3 sticky top-0 z-10 border-b border-gray-200">
                                 <div className="flex justify-between items-center w-full">
                                     <button onClick={() => setPrintOrders([])} className="text-gray-500 hover:text-gray-800 font-bold flex items-center gap-1"><Icons.X className="w-5 h-5"/> 閉じる</button>
-                                    <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-blue-600 text-white active:bg-blue-700"><Icons.Printer className="w-5 h-5"/> 印刷・PDF保存</button>
+                                    <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-nanairo-dark text-white active:opacity-90"><Icons.Printer className="w-5 h-5"/> 印刷・PDF保存</button>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-4 bg-gray-50 p-3 rounded-lg border border-gray-200 w-full text-sm">
                                     <div className="flex items-center gap-2">
@@ -572,7 +574,7 @@
                                     <input type="text" value={printName} onChange={e => setPrintName(e.target.value)} className="border border-gray-300 rounded p-1.5 w-full text-sm font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                                 </div>
                             )}
-                            <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-blue-600 text-white active:bg-blue-700"><Icons.Printer className="w-5 h-5"/> 印刷を実行</button>
+                            <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-nanairo-dark text-white active:opacity-90"><Icons.Printer className="w-5 h-5"/> 印刷を実行</button>
                         </div>
                         <div className="p-4 sm:p-8 mt-4 overflow-x-auto flex-1">
                             {printOrders.map((order, index) => {
@@ -681,7 +683,7 @@
                                 {deliveryRoutes.length > 0 && (
                                     <div className="flex flex-col gap-2">
                                         {deliveryRoutes.map(r => (
-                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-blue-600 text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm active:bg-blue-700">
+                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-nanairo-dark text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm active:bg-blue-700">
                                                 <span className="flex items-center gap-2"><Icons.MapPin className="w-5 h-5" />{r.label} の配送ルートを開く</span>
                                                 <span className="text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">{r.count}件</span>
                                             </a>
@@ -700,9 +702,9 @@
                                                     <div>
                                                         <div className="font-bold text-gray-800 text-lg flex items-center gap-2">{order.storeName ? <>{order.storeName}<span className="text-xs font-normal text-gray-500">（{order.userName} 様）</span></> : <>{order.userName} 様</>}</div>
                                                         {order.deliveryMethod === '配送' ? (
-                                                            <div className="text-sm text-blue-600 font-bold mt-1 flex items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {order.pickupDate} {order.pickupTime}{dayBadge(order.pickupDate)}</div>
+                                                            <div className="text-sm text-blue-600 font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {order.pickupDate} {order.pickupTime}{dayBadge(order.pickupDate)}</div>
                                                         ) : (
-                                                            <div className="text-sm text-nanairo-dark font-bold mt-1 flex items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 店頭受取: {order.pickupDate} {order.pickupTime}{dayBadge(order.pickupDate)}</div>
+                                                            <div className="text-sm text-nanairo-dark font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 店頭受取: {order.pickupDate} {order.pickupTime}{dayBadge(order.pickupDate)}</div>
                                                         )}
                                                     </div>
                                                     <div className="text-right">
@@ -1298,7 +1300,7 @@
                             <div className="px-4 py-3 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-2xl z-10 shrink-0">
                                 <h2 className="font-bold text-base flex items-center gap-2"><Icons.User className="w-5 h-5" />購入カルテ</h2>
                                 <div className="flex items-center gap-2">
-                                    <button type="button" onClick={() => openMonthlyReportPreview(c)} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm active:bg-blue-700 flex items-center gap-1"><Icons.FileText className="w-3.5 h-3.5"/> 請求明細書を作成</button>
+                                    <button type="button" onClick={() => openMonthlyReportPreview(c)} className="bg-nanairo-dark text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm active:bg-blue-700 flex items-center gap-1"><Icons.FileText className="w-3.5 h-3.5"/> 請求明細書を作成</button>
                                     <button type="button" onClick={() => setShowCustomerModal(null)} className="p-1.5 bg-gray-100 rounded-full active:bg-gray-200"><Icons.X className="w-5 h-5" /></button>
                                 </div>
                             </div>
@@ -1384,11 +1386,15 @@
 
             return (
                 <div className="app-container">
-                    <header className="no-print sticky top-0 z-30 bg-nanairo-light px-4 py-3 flex justify-between items-center shadow-sm">
-                        <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 bg-line rounded-full flex items-center justify-center text-white font-bold text-[9px] tracking-tighter">LINE</div>
-                            <span className="font-bold text-gray-800 text-sm">マイクロハーブ <span className="text-nanairo-dark text-xs ml-1">[管理]</span></span>
+                    <header className="no-print sticky top-0 z-30 bg-white shadow-sm">
+                        <div className="px-4 py-2 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <img src="images/logo.png" alt="" className="w-8 h-8 object-contain" />
+                                <span className="font-bold text-nanairo-dark">マイクロハーブ</span>
+                                <span className="text-[10px] font-bold text-white bg-nanairo-dark px-1.5 py-0.5 rounded">管理</span>
+                            </div>
                         </div>
+                        <div className="rainbow"></div>
                     </header>
 
                     {message && (
