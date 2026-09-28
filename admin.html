@@ -95,6 +95,9 @@
             Activity: ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         };
 
+        // ★画面に出さない商品（index.html の HIDDEN_PRODUCTS と同じにしてください）
+        const HIDDEN_PRODUCTS = ["なないろ菜", "レッドソレル"];
+
         const GAS_URL = "https://script.google.com/macros/s/AKfycbwv2XISbajDhH03WIIvr9-Br87CGaQcVYKtzk6flCluhncE6rfxlKS0fTN0vdbV5k-H9Q/exec"; 
 
         const toWareki = (dateStr) => {
@@ -228,7 +231,7 @@
                     if (data.message === 'AUTH_REQUIRED') return logout('パスワードが変更されたか、正しくありません。もう一度入力してください。');
                     if (data.status === 'error') return showMessage("データの取得に失敗しました。");
                     
-                    if (data.products) setProducts(data.products.filter(p => p.name !== "なないろ菜"));
+                    if (data.products) setProducts(data.products.filter(p => !HIDDEN_PRODUCTS.includes(p.name)));
                     if (data.orders) setOrders(data.orders);
                     if (data.analytics) setAnalytics(data.analytics);
                     setInsights(data.insights || null);

@@ -83,6 +83,10 @@
             "青じそ": "images/aojiso.jpg"
         };
 
+        // ★画面に出さない商品（スプレッドシートには残したまま、販売だけ止める）
+        //   admin.html の HIDDEN_PRODUCTS も同じにしてください
+        const HIDDEN_PRODUCTS = ["なないろ菜", "レッドソレル"];
+
         // ★配送ルール（GAS側の DELIVERY と同じ値にしてください）
         const DELIVERY = {
             days: [1, 2],                // 配送できる曜日（0=日,1=月,2=火 ...）
@@ -212,11 +216,11 @@
                     .then(data => {
                         if (Array.isArray(data)) {
                             const formattedData = data
-                                .filter(p => p.name !== "なないろ菜") // ★修正: なないろ菜のオンライン販売を停止中のため除外
+                                .filter(p => !HIDDEN_PRODUCTS.includes(p.name)) // ★販売停止中の商品は出さない
                                 .map(p => ({
                                     ...p,
                                     unit: 'P',
-                                    image: IMAGE_MAP[p.name] || `https://placehold.co/400x300/e6f4ea/16a34a?text=${encodeURIComponent(p.name)}`
+                                    image: IMAGE_MAP[p.name] || null // 写真がない商品は商品名を表示
                                 }));
                             setProductsData(formattedData);
                         }
@@ -477,7 +481,11 @@
                                                             </div>
                                                         )}
                                                         <div className="relative h-28 bg-gray-100">
-                                                            <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                                                            {product.image ? (
+                                                                <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <div className="w-full h-full flex items-center justify-center bg-nanairo-light text-nanairo-dark font-bold text-sm px-2 text-center">{product.name}</div>
+                                                            )}
                                                         </div>
                                                         <div className="p-2 flex-1 flex flex-col">
                                                             <h4 className="text-sm font-bold text-gray-800 leading-tight mb-1 line-clamp-2">{product.name}</h4>
