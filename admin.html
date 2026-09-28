@@ -35,6 +35,10 @@
         @media (min-width: 1024px) { .app-container { max-width: 1120px !important; } }
         .app-container { max-width: 600px; margin: 0 auto; background-color: #f3f4f6; min-height: 100vh; position: relative; display: flex; flex-direction: column; }
         .spinner { border: 3px solid rgba(255,255,255,0.3); border-left-color: #fff; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        .sk { background: linear-gradient(90deg,#ececec 25%,#f5f5f5 50%,#ececec 75%); background-size: 200% 100%; animation: sh 1.2s infinite; border-radius: 8px; }
+        @keyframes sh { to { background-position: -200% 0; } }
+        @keyframes walk { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-4px) rotate(3deg); } }
+        .walk { animation: walk .8s ease-in-out infinite; }
         .spinner-dark { border-color: rgba(0,0,0,0.1); border-left-color: #16a34a; }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -149,6 +153,18 @@
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [stockSheetOpen, setStockSheetOpen] = useState(false); // 在庫の入力（下から出る画面）
             const [selectedOrderId, setSelectedOrderId] = useState(null); // 詳細を開いている注文
+            const [moreView, setMoreView] = useState(null);               // 「その他」の中の画面
+            const [orderSearch, setOrderSearch] = useState('');
+            const [prepDay, setPrepDay] = useState('today');
+            const [doneFilter, setDoneFilter] = useState('all');
+            const [selectedCustomerKey, setSelectedCustomerKey] = useState(null);
+            const [customerSearch, setCustomerSearch] = useState('');
+            const [customerFilter, setCustomerFilter] = useState('all');
+            const [bulkMode, setBulkMode] = useState(false);              // 在庫のまとめて入力
+            const [bulkType, setBulkType] = useState('add');
+            const [bulkQty, setBulkQty] = useState({});
+            const [bulkRunning, setBulkRunning] = useState(false);
+            const [bulkProgress, setBulkProgress] = useState(0);
             
             // モーダル・キャンセル関連
             const [showBulkLossModal, setShowBulkLossModal] = useState(false);
@@ -460,10 +476,18 @@
             }
 
             if (isLoadingData) {
+                // 画面の形の下書きを先に出す（カメレオンが歩く）
+                const row = (w1, w2) => <div className="flex gap-3 items-center"><div className="sk w-12 h-10"></div><div className="flex-1 space-y-2"><div className="sk h-4" style={{ width: w1 }}></div><div className="sk h-3" style={{ width: w2 }}></div></div></div>;
                 return (
-                    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-500">
-                        <div className="spinner spinner-dark mb-4"></div>
-                        <p className="font-bold">最新データを同期中...</p>
+                    <div className="app-container">
+                        <header className="bg-white"><div className="px-4 py-2 flex items-center gap-2"><img src="images/logo.png" alt="" className="w-8 h-8 object-contain" /><span className="font-bold text-nanairo-dark">マイクロハーブ</span><span className="text-[10px] font-bold text-white bg-nanairo-dark px-1.5 py-0.5 rounded">管理</span></div><div className="rainbow"></div></header>
+                        <div className="px-4 pt-4 space-y-3 w-full max-w-[600px]">
+                            <div className="flex items-center gap-2 text-sm text-gray-500"><img src="images/logo.png" alt="" className="w-7 h-7 object-contain walk" />最新の注文を読み込んでいます…</div>
+                            <div className="sk h-10 w-full rounded-xl"></div>
+                            <div className="grid grid-cols-3 gap-2"><div className="sk h-14"></div><div className="sk h-14"></div><div className="sk h-14"></div></div>
+                            <div className="bg-white rounded-2xl p-3 space-y-3">{row('66%', '50%')}{row('50%', '66%')}{row('60%', '40%')}</div>
+                            <div className="bg-white rounded-2xl p-3">{row('50%', '33%')}</div>
+                        </div>
                     </div>
                 );
             }
@@ -649,275 +673,628 @@
                 );
             };
 
-            // 注文の詳細カード（スマホでは下から、iPad・PCでは右側に表示）
-            const renderOrderCard = (order) => (
-                                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
-                                            <div className={`px-4 py-2 flex justify-between items-center font-bold text-sm ${order.status === '未対応' ? 'bg-amber-50 text-amber-800 border-b border-amber-200' : 'bg-nanairo-light text-nanairo-dark border-b border-green-200'}`}>
-                                                <div className="flex items-center gap-1">{order.status === '未対応' ? <Icons.Clock className="w-4 h-4"/> : <Icons.Check className="w-4 h-4"/>}{order.status}</div>
-                                                <span className="text-xs font-normal opacity-90">注文: {order.orderDate}</span>
-                                            </div>
-                                            <div className="p-4">
-                                                <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-3">
-                                                    <div>
-                                                        <div className="font-bold text-gray-800 text-lg flex items-center gap-2">{order.storeName ? <>{order.storeName}<span className="text-xs font-normal text-gray-500">（{order.userName} 様）</span></> : <>{order.userName} 様</>}</div>
-                                                        {order.deliveryMethod === '配送' ? (
-                                                            <div className="text-sm text-blue-600 font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {fmtWhen(order.pickupDate, order.pickupTime)}{dayBadge(order.pickupDate)}</div>
-                                                        ) : (
-                                                            <div className="text-sm text-nanairo-dark font-bold mt-1 flex flex-wrap items-center gap-1"><Icons.ShoppingBag className="w-4 h-4"/> 店頭受取: {fmtWhen(order.pickupDate, order.pickupTime)}{dayBadge(order.pickupDate)}</div>
-                                                        )}
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <div className="text-sm text-gray-500 mb-0.5 whitespace-nowrap">合計金額</div>
-                                                        <div className="font-bold text-xl text-gray-900">¥{Number(order.totalPrice || 0).toLocaleString()}</div>
-                                                        {order.deliveryMethod === '配送' && <div className="text-[10px] text-gray-500">{order.shippingFee > 0 ? `送料¥${order.shippingFee}込` : '送料無料'}</div>}
-                                                    </div>
-                                                </div>
-                                                <div className="mb-4">
-                                                    <div className="text-xs text-gray-500 font-bold mb-2">ご注文内容:</div>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {order.itemsList && order.itemsList.map((item, idx) => (
-                                                            <span key={idx} className="bg-green-50 text-green-800 border border-green-200 px-2.5 py-1.5 rounded-lg text-xs font-bold shadow-sm">{item.name} <span className="text-green-600 ml-1">×{item.qty}</span></span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                {order.deliveryMethod === '配送' && (
-                                                    <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg mb-3 text-xs text-blue-900 space-y-1.5">
-                                                        <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent('山形県' + order.address)}`} target="_blank" rel="noopener" className="flex gap-1.5 items-start font-bold underline decoration-blue-300"><Icons.MapPin className="w-4 h-4 shrink-0"/>{order.address || '（住所未入力）'}</a>
-                                                        {order.phone && <a href={`tel:${order.phone}`} className="flex gap-1.5 items-center font-bold"><Icons.Phone className="w-4 h-4 shrink-0"/>{order.phone}</a>}
-                                                    </div>
-                                                )}
-                                                {order.memo && order.memo !== "なし" && (
-                                                    <div className="bg-yellow-50 border border-yellow-200 p-2.5 rounded-lg mb-4 text-xs text-yellow-800 flex gap-1.5 items-start"><Icons.ClipboardList className="w-4 h-4 shrink-0 mt-0.5"/><span>{order.memo}</span></div>
-                                                )}
-                                                <div className="flex gap-2 mt-3 mb-1">
-                                                    <button type="button" onClick={() => toggleCheck(order.id, 'senmu', !order.senmuChecked)} className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 border transition-colors ${order.senmuChecked ? 'bg-blue-50 text-blue-600 border-blue-200 shadow-inner' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                                                        <div className={`w-4 h-4 rounded-full flex items-center justify-center border ${order.senmuChecked ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 bg-white'}`}>{order.senmuChecked && <Icons.Check className="w-3 h-3" />}</div>専務確認
-                                                    </button>
-                                                    <button type="button" onClick={() => toggleCheck(order.id, 'cafe', !order.cafeChecked)} className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 border transition-colors ${order.cafeChecked ? 'bg-orange-50 text-orange-600 border-orange-200 shadow-inner' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                                                        <div className={`w-4 h-4 rounded-full flex items-center justify-center border ${order.cafeChecked ? 'bg-orange-500 border-orange-500 text-white' : 'border-gray-300 bg-white'}`}>{order.cafeChecked && <Icons.Check className="w-3 h-3" />}</div>カフェ確認
-                                                    </button>
-                                                    <button type="button" onClick={() => toggleCheck(order.id, 'paid', !order.paidChecked)} className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 border transition-colors ${order.paidChecked ? 'bg-green-50 text-green-700 border-green-200 shadow-inner' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                                                        <div className={`w-4 h-4 rounded-full flex items-center justify-center border ${order.paidChecked ? 'bg-green-600 border-green-600 text-white' : 'border-gray-300 bg-white'}`}>{order.paidChecked && <Icons.Check className="w-3 h-3" />}</div>集金済
-                                                    </button>
-                                                </div>
-                                                <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
-                                                    <div className="flex gap-1 flex-1">
-                                                        <button type="button" onClick={() => openPrintPreview(order, 'invoice')} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg text-[11px] font-bold text-gray-600 active:bg-gray-100 flex items-center justify-center gap-1 h-10 shadow-sm"><Icons.FileText className="w-3.5 h-3.5"/>納品書</button>
-                                                        <button type="button" onClick={() => openPrintPreview(order, 'receipt')} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg text-[11px] font-bold text-gray-600 active:bg-gray-100 flex items-center justify-center gap-1 h-10 shadow-sm"><Icons.FileText className="w-3.5 h-3.5"/>領収書</button>
-                                                    </div>
-                                                    <button type="button" onClick={() => { toggleOrderStatus(order.id, order.status); setSelectedOrderId(null); }} className={`flex-[1.5] h-10 rounded-lg font-bold text-sm transition-colors shadow-sm ${order.status === '未対応' ? 'bg-nanairo-light text-nanairo-dark border border-nanairo hover:bg-green-100' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>{order.status === '未対応' ? '準備完了にする' : (order.deliveryMethod === '配送' ? '配達済にする' : '受渡済にする')}</button>
-                                                </div>
-                                            </div>
-                                        </div>
+            /* ===================== ★管理画面の刷新（v5） ===================== */
+            const custKey = (o) => o.userId || ('name:' + (o.storeName || o.userName || ''));
+            const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+            const isUnpaid = (o) => o.status === '受渡済' && !o.paidChecked;
+            const shortDate = (d) => fmtWhen(d, '').trim();
+
+            // お客様ごとの集計（注文データから作る）
+            const customerList = (() => {
+                const map = {};
+                [...orders].sort((a, b) => String(a.pickupDate).localeCompare(String(b.pickupDate))).forEach(o => {
+                    const k = custKey(o);
+                    const c = map[k] || (map[k] = { key: k, userName: '', storeName: '', phone: '', address: '', orders: [], count: 0, spend: 0, unpaid: 0, unpaidCount: 0, first: '', last: '', items: {} });
+                    c.orders.push(o);
+                    if (o.userName) c.userName = o.userName;
+                    if (o.storeName) c.storeName = o.storeName;
+                    if (o.phone) c.phone = o.phone;
+                    if (o.address) c.address = o.address;
+                    if (o.status === 'キャンセル') return;
+                    c.count++; c.spend += Number(o.totalPrice || 0);
+                    if (!c.first) c.first = o.pickupDate;
+                    c.last = o.pickupDate;
+                    if (isUnpaid(o)) { c.unpaid += Number(o.totalPrice || 0); c.unpaidCount++; }
+                    (o.itemsList || []).forEach(i => { c.items[i.name] = (c.items[i.name] || 0) + i.qty; });
+                });
+                return Object.values(map).map(c => {
+                    const dates = c.orders.filter(o => o.status !== 'キャンセル').map(o => o.pickupDate).sort();
+                    const gap = dates.length >= 2 ? Math.round(daysBetween(dates[0], dates[dates.length - 1]) / (dates.length - 1)) : null;
+                    const since = c.last ? daysBetween(c.last, todayStr) : null;
+                    const followUp = since != null && since >= (gap ? Math.max(21, gap * 2) : 30);
+                    const favorites = Object.entries(c.items).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
+                    return { ...c, name: c.storeName || c.userName || '（名前なし）', avgGap: gap, daysSince: since, followUp, favorites };
+                }).sort((a, b) => String(b.last).localeCompare(String(a.last)));
+            })();
+            const customerOf = (o) => customerList.find(c => c.key === custKey(o));
+
+            // 状態を直接変える（詳細の①②③、まとめて準備完了で使う）
+            const setOrderStatus = async (order, newStatus) => {
+                if (!order || order.status === newStatus || order.status === 'キャンセル') return;
+                const prev = order.status;
+                setOrders(p => p.map(o => o.id === order.id ? { ...o, status: newStatus } : o));
+                try { await postAdmin({ action: "statusUpdate", orderId: order.id, newStatus }); }
+                catch (e) { showMessage("状態の更新に失敗しました: " + e.message, 6000); setOrders(p => p.map(o => o.id === order.id ? { ...o, status: prev } : o)); }
+            };
+
+            // お客様ごとの請求明細書（指定した注文から作る）
+            const openCustomerReport = (c, list) => {
+                const valid = list.filter(o => o.status !== 'キャンセル').sort((a, b) => a.pickupDate.localeCompare(b.pickupDate));
+                if (valid.length === 0) return showMessage('対象の注文がありません。');
+                const detailedOrders = [];
+                valid.forEach(o => {
+                    (o.itemsList || []).forEach(i => { const p = products.find(x => x.name === i.name); detailedOrders.push({ date: o.pickupDate, name: i.name, qty: i.qty, unitPrice: p ? Number(p.price) : 0 }); });
+                    if (o.shippingFee > 0) detailedOrders.push({ date: o.pickupDate, name: '配送料', qty: 1, unitPrice: o.shippingFee, isShipping: true });
+                });
+                setPrintOrders([{ id: 'report-' + c.key, userName: c.name, detailedOrders }]); setPrintType('monthly_report');
+                setPrintName(c.name); setPrintHonorific(c.storeName ? '御中' : '様');
+                const last = valid[valid.length - 1].pickupDate;
+                setReportStartDate(valid[0].pickupDate); setReportEndDate(last); setReportClosingDate(last);
+            };
+
+            // 選んだ月の注文をCSVで保存（会計・税理士さん向け）
+            const downloadCsv = () => {
+                const rows = [['注文ID', '注文日時', '受取日', '時間', '受取方法', 'お名前', '店舗名', '商品', '合計', '配送料', '状態', '集金', '住所', '電話']];
+                orders.filter(inViewPeriod).sort((a, b) => a.pickupDate.localeCompare(b.pickupDate)).forEach(o => rows.push([
+                    o.id, o.orderDate, o.pickupDate, o.pickupTime, o.deliveryMethod, o.userName, o.storeName,
+                    (o.itemsList || []).map(i => `${i.name}×${i.qty}`).join(' / '), o.totalPrice, o.shippingFee, o.status, o.paidChecked ? '済' : '', o.address, o.phone
+                ]));
+                const csv = '﻿' + rows.map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                a.download = `注文_${viewStartMonth}.csv`;
+                a.click();
+            };
+
+            // 準備リストを印刷（別の画面を開いて印刷）
+            const printPrepList = (label, rows) => {
+                const w = window.open('', '_blank');
+                if (!w) return showMessage('ポップアップを許可してください');
+                w.document.write(`<html><head><meta charset="utf-8"><title>準備リスト</title><style>body{font-family:sans-serif;padding:24px}h2{margin:0 0 12px}td{padding:8px 16px;border-bottom:1px solid #ddd;font-size:20px}</style></head><body><h2>準備リスト ${label}</h2><table>${rows.map(r => `<tr><td>${r.name}</td><td style="text-align:right"><b>${r.qty}</b></td></tr>`).join('')}</table></body></html>`);
+                w.document.close(); w.print();
+            };
+
+            // 在庫のまとめて入力
+            const submitBulk = async () => {
+                const items = products.filter(p => (bulkQty[p.id] || 0) > 0);
+                if (items.length === 0) return;
+                if (bulkType !== 'add') {
+                    const over = items.find(p => bulkQty[p.id] > p.stock);
+                    if (over) return showMessage(`${over.name} は在庫（${over.stock}）より多い数です`, 5000);
+                }
+                setBulkRunning(true);
+                let done = 0;
+                try {
+                    for (const p of items) {
+                        await postAdmin({ action: "stockUpdate", productId: p.id, type: bulkType, amount: bulkQty[p.id], memo: 'まとめて入力' });
+                        done++; setBulkProgress(done);
+                    }
+                    showMessage(`${done}商品をまとめて記録しました`);
+                    setBulkQty({}); setBulkMode(false);
+                } catch (e) {
+                    showMessage(`${done}商品まで記録しました。残りは記録できませんでした: ${e.message}`, 8000);
+                } finally {
+                    setBulkRunning(false); setBulkProgress(0); fetchData(viewStartMonth, viewEndMonth);
+                }
+            };
+
+            const statusChip = (o) => {
+                const [cls, label] = o.status === '未対応' ? ['bg-amber-100 text-amber-800', '未対応']
+                    : o.status === '準備完了' ? ['bg-green-100 text-nanairo-dark', '準備完了']
+                    : o.status === 'キャンセル' ? ['bg-gray-100 text-gray-500', 'キャンセル']
+                    : o.paidChecked ? ['bg-green-50 text-nanairo-dark', '集金済'] : ['bg-red-50 text-red-600 border border-red-200', '未集金'];
+                return <span className={`text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap ${cls}`}>{label}</span>;
+            };
+
+            // 注文の1行（一覧・検索・台帳で共通）
+            const orderRow = (o, showDate) => {
+                const isDeliv = o.deliveryMethod === '配送';
+                const [, m, d] = String(o.pickupDate).split('-').map(Number);
+                return (
+                    <button key={o.id} type="button" onClick={() => setSelectedOrderId(o.id)} className={`w-full text-left p-3 flex items-center gap-3 active:bg-gray-50 ${selectedOrderId === o.id ? 'bg-nanairo-light' : ''} ${o.status === 'キャンセル' ? 'opacity-50' : ''}`}>
+                        <div className="text-center w-12 shrink-0">
+                            <div className={`text-xs font-bold ${isDeliv ? 'text-blue-600' : 'text-gray-500'}`}>{isDeliv ? '配送' : '店頭'}</div>
+                            <div className="text-sm font-bold text-gray-900">{showDate ? `${m}/${d}` : String(o.pickupTime).split('-')[0]}</div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className={`font-bold text-gray-900 truncate ${o.status === 'キャンセル' ? 'line-through' : ''}`}>{o.storeName || o.userName}</div>
+                            <div className="text-xs text-gray-500 truncate">{(o.itemsList || []).map(i => `${i.name}×${i.qty}`).join('、')}　¥{Number(o.totalPrice || 0).toLocaleString()}</div>
+                        </div>
+                        {statusChip(o)}
+                    </button>
+                );
+            };
+
+            const Switch = ({ on }) => (
+                <span className={`relative inline-block w-10 h-6 rounded-full transition-colors shrink-0 ${on ? 'bg-nanairo-dark' : 'bg-gray-300'}`}>
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`}></span>
+                </span>
             );
 
+            // 注文の詳細
+            const renderOrderDetail = (order) => {
+                const c = customerOf(order);
+                const isDeliv = order.deliveryMethod === '配送';
+                const isCancelled = order.status === 'キャンセル';
+                const steps = [['未対応', '未対応'], ['準備完了', '準備完了'], ['受渡済', isDeliv ? '配達済' : 'お渡し済']];
+                const cur = steps.findIndex(s => s[0] === order.status);
+                const next = order.status === '未対応' ? ['準備完了', '準備完了にする'] : order.status === '準備完了' ? ['受渡済', isDeliv ? '配達済にする' : 'お渡し済にする'] : null;
+                const valid = c ? c.orders.filter(o => o.status !== 'キャンセル') : [];
+                const orderNo = valid.filter(o => o.pickupDate <= order.pickupDate).length;
+                const prevOrder = valid.filter(o => o.pickupDate < order.pickupDate).slice(-1)[0];
+                return (
+                    <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <div className="text-xs text-gray-500">{order.orderDate} に注文</div>
+                                <h3 className="text-xl font-bold text-gray-900 leading-tight">{order.storeName || order.userName}</h3>
+                                {order.storeName && <div className="text-sm text-gray-500">{order.userName} 様</div>}
+                                <div className="flex flex-wrap gap-1 mt-1.5 text-[11px] font-bold">
+                                    {orderNo > 0 && <span className="px-2 py-0.5 rounded-full bg-nanairo-light text-nanairo-dark">利用 {orderNo}回目</span>}
+                                    {prevOrder && <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">前回 {shortDate(prevOrder.pickupDate)}</span>}
+                                    {c && c.unpaid > 0 && <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600">未集金 ¥{c.unpaid.toLocaleString()}</span>}
+                                </div>
+                            </div>
+                            <div className="flex gap-1.5 shrink-0">
+                                <button type="button" title="納品書" onClick={() => openPrintPreview(order, 'invoice')} className="h-9 px-2.5 rounded-full bg-white border border-gray-200 flex items-center gap-1 text-xs font-bold text-gray-600"><Icons.FileText className="w-4 h-4" />納品書</button>
+                                <button type="button" title="領収書" onClick={() => openPrintPreview(order, 'receipt')} className="h-9 px-2.5 rounded-full bg-white border border-gray-200 flex items-center gap-1 text-xs font-bold text-gray-600"><Icons.Printer className="w-4 h-4" />領収書</button>
+                            </div>
+                        </div>
+
+                        {isCancelled ? (
+                            <div className="rounded-xl bg-gray-100 text-gray-500 font-bold text-center py-2.5 text-sm">キャンセルされた注文です</div>
+                        ) : (
+                            <div className="grid grid-cols-3 gap-1 bg-white rounded-xl p-1 text-xs font-bold border border-gray-200">
+                                {steps.map(([st, label], i) => (
+                                    <button key={st} type="button" onClick={() => setOrderStatus(order, st)} className={`rounded-lg py-2 ${i === cur ? (i === 0 ? 'bg-amber-100 text-amber-800' : 'bg-nanairo-light text-nanairo-dark') : i < cur ? 'text-nanairo-dark' : 'text-gray-400'}`}>
+                                        {i < cur ? '✓ ' : `${'①②③'[i]} `}{label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                            <div className="flex items-center gap-3 px-4 py-3"><span className="text-lg">{isDeliv ? '🚚' : '🏪'}</span><div className="flex-1"><div className="text-xs text-gray-500">{isDeliv ? '配送' : '店頭受取'}</div><div className="font-bold text-gray-900 flex flex-wrap items-center">{fmtWhen(order.pickupDate, order.pickupTime)}{dayBadge(order.pickupDate)}</div></div></div>
+                            {isDeliv && (
+                                <div className="flex items-center gap-3 px-4 py-3"><span className="text-lg">📍</span><div className="flex-1 min-w-0"><div className="text-xs text-gray-500">お届け先</div><div className="font-bold text-gray-900">{order.address || '（住所未入力）'}</div></div>
+                                    {order.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent('山形県' + order.address)}`} target="_blank" rel="noopener" className="text-xs font-bold text-nanairo-dark border border-nanairo-dark rounded-full px-3 py-1.5 shrink-0">地図</a>}</div>
+                            )}
+                            {order.phone && (
+                                <div className="flex items-center gap-3 px-4 py-3"><span className="text-lg">📞</span><div className="flex-1"><div className="text-xs text-gray-500">電話</div><div className="font-bold text-gray-900">{order.phone}</div></div><a href={`tel:${order.phone}`} className="text-xs font-bold text-nanairo-dark border border-nanairo-dark rounded-full px-3 py-1.5 shrink-0">発信</a></div>
+                            )}
+                            {order.memo && order.memo !== 'なし' && (
+                                <div className="flex items-start gap-3 px-4 py-3"><span className="text-lg">💬</span><div className="flex-1"><div className="text-xs text-gray-500">お客様からの備考</div><div className="text-sm text-gray-900">{order.memo}</div></div></div>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3 text-sm">
+                            {(order.itemsList || []).map((i, idx) => <div key={idx} className="flex justify-between py-1"><span className="text-gray-800">{i.name}</span><span className="font-bold">× {i.qty}</span></div>)}
+                            {isDeliv && <div className="flex justify-between py-1 text-gray-500"><span>配送料</span><span>{order.shippingFee > 0 ? `¥${Number(order.shippingFee).toLocaleString()}` : '無料'}</span></div>}
+                            <div className="flex justify-between pt-2 mt-1 border-t border-gray-100"><b className="text-gray-900">合計（現金）</b><b className="text-lg text-gray-900">¥{Number(order.totalPrice || 0).toLocaleString()}</b></div>
+                        </div>
+
+                        {!isCancelled && (
+                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 text-sm">
+                                {[['senmu', '専務確認', 'senmuChecked'], ['cafe', 'カフェ確認', 'cafeChecked'], ['paid', '集金済', 'paidChecked']].map(([role, label, f]) => (
+                                    <button key={role} type="button" onClick={() => toggleCheck(order.id, role, !order[f])} className="w-full flex items-center justify-between px-4 py-2.5"><span className="text-gray-700">{label}</span><Switch on={!!order[f]} /></button>
+                                ))}
+                            </div>
+                        )}
+
+                        {c && <button type="button" onClick={() => { setSelectedOrderId(null); setActiveTab('customers'); setSelectedCustomerKey(c.key); }} className="w-full text-right text-xs font-bold text-nanairo-dark">このお客様の台帳を開く ›</button>}
+                        {next && <button type="button" onClick={() => setOrderStatus(order, next[0])} className="w-full rounded-xl py-3.5 bg-nanairo-dark text-white font-bold active:opacity-90">{next[1]}</button>}
+                        {!isCancelled && cur > 0 && <button type="button" onClick={() => setOrderStatus(order, steps[cur - 1][0])} className="w-full text-center text-xs text-gray-400 underline">ひとつ前の状態に戻す</button>}
+                    </div>
+                );
+            };
+
+            // 注文タブ
             const renderOrdersTab = () => {
-                const isCurrentMonth = viewStartMonth === todayMonth;
                 const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了')
                     .sort((a, b) => (a.pickupDate + a.pickupTime).localeCompare(b.pickupDate + b.pickupTime));
-                const pastOrders = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o));
+                const q = orderSearch.trim().toLowerCase().replace(/-/g, '');
+                const results = q ? orders.filter(o => [o.userName, o.storeName, o.phone].some(v => String(v || '').toLowerCase().replace(/-/g, '').includes(q)))
+                    .sort((a, b) => String(b.pickupDate).localeCompare(String(a.pickupDate))) : [];
+                const todays = activeOrders.filter(o => o.pickupDate === todayStr);
+                const unpaidCount = orders.filter(isUnpaid).length;
+
+                // 準備リスト（今日・明日）
+                const prepDate = prepDay === 'today' ? todayStr : tomorrowStr;
+                const prepOrders = activeOrders.filter(o => o.pickupDate === prepDate);
+                const prepMap = {};
+                prepOrders.forEach(o => (o.itemsList || []).forEach(i => { prepMap[i.name] = (prepMap[i.name] || 0) + i.qty; }));
+                const prepRows = Object.entries(prepMap).sort((a, b) => b[1] - a[1]).map(([name, qty]) => ({ name, qty, left: (products.find(p => p.name === name) || {}).stock }));
+
                 // 配送日ごとのルート（今日以降・未配達の配送のみ）。出発地は現在地、市町村ごとにまとめて並べる
                 const AREA_ORDER = ["鶴岡市", "三川町", "庄内町", "酒田市", "遊佐町"];
                 const areaRank = (addr) => { const i = AREA_ORDER.findIndex(a => String(addr).startsWith(a)); return i < 0 ? 99 : i; };
                 const routeByDate = {};
-                activeOrders.filter(o => o.deliveryMethod === '配送' && o.address && o.pickupDate >= todayStr).forEach(o => {
-                    (routeByDate[o.pickupDate] = routeByDate[o.pickupDate] || []).push(o);
-                });
+                activeOrders.filter(o => o.deliveryMethod === '配送' && o.address && o.pickupDate >= todayStr).forEach(o => { (routeByDate[o.pickupDate] = routeByDate[o.pickupDate] || []).push(o); });
                 const deliveryRoutes = Object.keys(routeByDate).sort().map(date => {
-                    const stops = [...new Set(routeByDate[date]
-                        .sort((a, b) => areaRank(a.address) - areaRank(b.address) || a.address.localeCompare(b.address, 'ja'))
-                        .map(o => '山形県' + o.address))];
-                    const dest = stops[stops.length - 1];
-                    const waypoints = stops.slice(0, -1);
-                    const url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest)
-                        + (waypoints.length ? '&waypoints=' + encodeURIComponent(waypoints.join('|')) : '');
-                    const [, m, d] = date.split('-').map(Number);
-                    const label = date === todayStr ? `今日（${m}/${d}）` : `${m}/${d}（${'日月火水木金土'[new Date(date + 'T00:00:00+09:00').getDay()]}）`;
-                    return { date, url, label, count: routeByDate[date].length };
+                    const stops = [...new Set(routeByDate[date].slice().sort((a, b) => areaRank(a.address) - areaRank(b.address) || a.address.localeCompare(b.address, 'ja')).map(o => '山形県' + o.address))];
+                    const url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(stops[stops.length - 1])
+                        + (stops.length > 1 ? '&waypoints=' + encodeURIComponent(stops.slice(0, -1).join('|')) : '');
+                    return { date, url, label: date === todayStr ? `今日（${shortDate(date)}）` : shortDate(date), count: routeByDate[date].length };
                 });
 
+                const groups = [
+                    { key: 'late', label: '日付を過ぎた注文', badge: 'bg-gray-700', list: activeOrders.filter(o => o.pickupDate < todayStr) },
+                    { key: 'today', label: '今日', badge: 'bg-red-500', list: todays },
+                    { key: 'tomorrow', label: '明日', badge: 'bg-orange-400', list: activeOrders.filter(o => o.pickupDate === tomorrowStr) },
+                    { key: 'later', label: 'それ以降', badge: 'bg-gray-400', list: activeOrders.filter(o => o.pickupDate > tomorrowStr) },
+                ];
+                const markTodayReady = async () => {
+                    const list = todays.filter(o => o.status === '未対応');
+                    for (const o of list) await setOrderStatus(o, '準備完了');
+                    showMessage(`${list.length}件を準備完了にしました`);
+                };
+
+                // 済んだ注文
+                const done = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o)).sort((a, b) => String(b.pickupDate).localeCompare(String(a.pickupDate)));
+                const doneCounts = { all: done.length, unpaid: done.filter(isUnpaid).length, done: done.filter(o => o.status === '受渡済').length, cancel: done.filter(o => o.status === 'キャンセル').length };
+                const doneShown = done.filter(o => doneFilter === 'all' || (doneFilter === 'unpaid' ? isUnpaid(o) : doneFilter === 'done' ? o.status === '受渡済' : o.status === 'キャンセル'));
                 const selectedOrder = orders.find(o => o.id === selectedOrderId);
+
                 return (
                     <div className="lg:flex lg:gap-6 lg:items-start">
-                    <div className="animate-slide-up space-y-5 relative z-10 lg:w-[440px] lg:shrink-0">
-                        <div className="flex flex-col gap-3 mb-4">
-                            <div className="flex justify-between items-center">
-                                <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm w-fit">
-                                    <Icons.Calendar className="w-4 h-4 text-gray-500" />
-                                    <input type="month" value={viewStartMonth} onChange={(e) => setViewStartMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
-                                    <span className="text-gray-400 font-bold">〜</span>
-                                    <input type="month" value={viewEndMonth} onChange={(e) => setViewEndMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
+                        <div className="space-y-4 lg:w-[440px] lg:shrink-0">
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3">
+                                    <span className="text-gray-400">🔍</span>
+                                    <input type="search" value={orderSearch} onChange={e => setOrderSearch(e.target.value)} placeholder="お名前・店舗名・電話番号で探す" className="flex-1 min-w-0 py-2.5 text-sm outline-none bg-transparent" />
+                                    {orderSearch && <button type="button" onClick={() => setOrderSearch('')} className="text-gray-400"><Icons.X className="w-4 h-4" /></button>}
                                 </div>
-                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
+                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2.5 bg-white rounded-xl border border-gray-200 text-gray-500" title="最新にする"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
                             </div>
-                            <div className="flex gap-2">
-                                <button type="button" onClick={() => openBulkPrintPreview('invoice')} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-bold text-gray-700 shadow-sm active:bg-gray-50 flex justify-center items-center gap-2"><Icons.FileText className="w-4 h-4 text-blue-500"/> 納品書 一括出力</button>
-                                <button type="button" onClick={() => openBulkPrintPreview('receipt')} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-bold text-gray-700 shadow-sm active:bg-gray-50 flex justify-center items-center gap-2"><Icons.FileText className="w-4 h-4 text-green-500"/> 領収書 一括出力</button>
-                            </div>
-                        </div>
 
-                        {isCurrentMonth && (
-                            <>
-                                <div className="flex justify-between items-end border-l-4 border-nanairo-dark pl-2">
-                                    <h1 className="text-xl font-bold text-gray-800">注文対応</h1>
-                                    <span className="text-sm font-bold text-nanairo-dark bg-nanairo-light px-2 py-1 rounded">未対応: {activeOrders.filter(o=>o.status==='未対応').length}件</span>
+                            {q ? (
+                                <div>
+                                    <div className="text-sm font-bold text-gray-700 mb-1.5">「{orderSearch}」の検索結果　{results.length}件</div>
+                                    {results.length === 0 ? <div className="text-center py-8 bg-white rounded-2xl border border-gray-200 text-gray-500 text-sm">見つかりませんでした</div>
+                                        : <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">{results.map(o => orderRow(o, true))}</div>}
                                 </div>
-                                {/* ★配送ルート：配送日ごとに、Googleマップで配送先を順番に回る道案内を開く */}
+                            ) : (<>
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                    <div className="bg-white rounded-2xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">今日の受け取り</div><b className="text-xl">{todays.filter(o => o.deliveryMethod !== '配送').length}<span className="text-xs font-normal">件</span></b></div>
+                                    <div className="bg-white rounded-2xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">今日の配送</div><b className="text-xl text-blue-600">{todays.filter(o => o.deliveryMethod === '配送').length}<span className="text-xs font-normal">件</span></b></div>
+                                    <button type="button" onClick={() => { setActiveTab('more'); setMoreView('receivables'); }} className={`bg-white rounded-2xl border py-2 ${unpaidCount ? 'border-red-200' : 'border-gray-200'}`}><div className="text-[10px] text-gray-500">未集金</div><b className={`text-xl ${unpaidCount ? 'text-red-500' : ''}`}>{unpaidCount}<span className="text-xs font-normal">件</span></b></button>
+                                </div>
+
+                                <div className="bg-white rounded-2xl border border-gray-200 p-3">
+                                    <div className="flex items-center justify-between">
+                                        <b className="text-sm text-gray-900">📦 準備リスト</b>
+                                        <div className="flex items-center gap-1">
+                                            <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-bold">
+                                                {[['today', '今日'], ['tomorrow', '明日']].map(([k, l]) => <button key={k} type="button" onClick={() => setPrepDay(k)} className={`px-2.5 py-1 rounded-md ${prepDay === k ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>{l}</button>)}
+                                            </div>
+                                            {prepRows.length > 0 && <button type="button" onClick={() => printPrepList(shortDate(prepDate), prepRows)} className="text-[11px] font-bold text-gray-500 border border-gray-200 rounded-full px-2 py-1">🖨 印刷</button>}
+                                        </div>
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-0.5">{shortDate(prepDate)} に渡す {prepOrders.length}件の合計（在庫から取り置き済み）</div>
+                                    {prepRows.length === 0 ? <div className="text-sm text-gray-400 text-center py-3">準備するものはありません</div> : (
+                                        <div className="mt-1 divide-y divide-gray-100 text-sm">
+                                            {prepRows.map(r => <div key={r.name} className="flex justify-between items-center py-1.5"><span>{r.name}</span><span><b className="text-lg">{r.qty}</b> <span className="text-xs text-gray-400">残り {r.left != null ? r.left : '-'}</span></span></div>)}
+                                        </div>
+                                    )}
+                                </div>
+
                                 {deliveryRoutes.length > 0 && (
                                     <div className="flex flex-col gap-2">
                                         {deliveryRoutes.map(r => (
-                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-nanairo-dark text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm active:bg-blue-700">
+                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-nanairo-dark text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm">
                                                 <span className="flex items-center gap-2"><Icons.MapPin className="w-5 h-5" />{r.label} の配送ルートを開く</span>
                                                 <span className="text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">{r.count}件</span>
                                             </a>
                                         ))}
                                     </div>
                                 )}
-                                {(() => {
-                                    // 受取日（配送日）で「日付を過ぎた・今日・明日・それ以降」に分ける（一覧は1つのまま）
-                                    const groups = [
-                                        { key: 'late', label: '日付を過ぎた注文', badge: 'bg-gray-700', list: activeOrders.filter(o => o.pickupDate < todayStr) },
-                                        { key: 'today', label: '今日', badge: 'bg-red-500', list: activeOrders.filter(o => o.pickupDate === todayStr) },
-                                        { key: 'tomorrow', label: '明日', badge: 'bg-orange-400', list: activeOrders.filter(o => o.pickupDate === tomorrowStr) },
-                                        { key: 'later', label: 'それ以降', badge: 'bg-gray-400', list: activeOrders.filter(o => o.pickupDate > tomorrowStr) },
-                                    ];
-                                    if (activeOrders.length === 0) return <div className="text-center py-10 bg-white rounded-xl border border-gray-200 text-gray-500">現在、対応が必要な注文はありません。</div>;
-                                    return groups.filter(g => g.list.length > 0 || g.key === 'today').map(g => (
+
+                                {activeOrders.length === 0 ? <div className="text-center py-8 bg-white rounded-2xl border border-gray-200 text-gray-500 text-sm">対応が必要な注文はありません</div>
+                                    : groups.filter(g => g.list.length > 0 || g.key === 'today').map(g => (
                                         <div key={g.key}>
                                             <div className="flex items-center gap-2 mb-1.5">
                                                 <span className={`text-xs font-bold text-white px-2 py-0.5 rounded ${g.badge}`}>{g.label}</span>
-                                                <span className="text-sm font-bold text-gray-700">{g.key === 'today' ? fmtWhen(todayStr, '').trim() : g.key === 'tomorrow' ? fmtWhen(tomorrowStr, '').trim() : ''}　{g.list.length}件</span>
+                                                <span className="text-sm font-bold text-gray-700">{g.key === 'today' ? shortDate(todayStr) : g.key === 'tomorrow' ? shortDate(tomorrowStr) : ''}　{g.list.length}件</span>
+                                                {g.key === 'today' && g.list.some(o => o.status === '未対応') && <button type="button" onClick={markTodayReady} className="ml-auto text-[11px] font-bold text-nanairo-dark">まとめて準備完了</button>}
                                             </div>
-                                            {g.list.length > 0 && (
-                                                <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
-                                                    {g.list.map(o => {
-                                                        const isDeliv = o.deliveryMethod === '配送';
-                                                        const [, m, d] = o.pickupDate.split('-').map(Number);
-                                                        const selected = selectedOrderId === o.id;
-                                                        return (
-                                                            <button key={o.id} type="button" onClick={() => setSelectedOrderId(o.id)} className={`w-full text-left p-3 flex items-center gap-3 active:bg-gray-50 ${selected ? 'bg-nanairo-light' : ''}`}>
-                                                                <div className="text-center w-12 shrink-0">
-                                                                    <div className={`text-xs font-bold ${isDeliv ? 'text-blue-600' : 'text-gray-500'}`}>{isDeliv ? '配送' : '店頭'}</div>
-                                                                    <div className="text-sm font-bold text-gray-900">{g.key === 'later' || g.key === 'late' ? `${m}/${d}` : String(o.pickupTime).split('-')[0]}</div>
-                                                                </div>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="font-bold text-gray-900 truncate">{o.storeName || o.userName}</div>
-                                                                    <div className="text-xs text-gray-500 truncate">{(o.itemsList || []).map(i => `${i.name}×${i.qty}`).join('、')}　¥{Number(o.totalPrice || 0).toLocaleString()}</div>
-                                                                </div>
-                                                                <span className={`text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap ${o.status === '未対応' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-nanairo-dark'}`}>{o.status}</span>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
+                                            {g.list.length > 0 && <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">{g.list.map(o => orderRow(o, g.key === 'later' || g.key === 'late'))}</div>}
                                         </div>
-                                    ));
-                                })()}
-                                <p className="text-xs text-gray-500">行をタップすると、住所・電話・確認チェック・印刷などの詳細が開きます。</p>
-                            </>
-                        )}
-                        <div className={isCurrentMonth ? "pt-4 border-t border-gray-200" : ""}>
-                            <button type="button" onClick={() => setIsPastOrdersOpen(!isPastOrdersOpen)} className="w-full flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-200 shadow-sm active:bg-gray-100 mb-2">
-                                <h3 className="font-bold text-gray-600 text-sm flex items-center gap-2"><Icons.ClipboardList className="w-4 h-4" /> 処理済・キャンセル ({pastOrders.length}件)</h3>
-                                <span className="text-gray-400 font-bold text-xs">{isPastOrdersOpen ? '閉じる ▲' : '一覧を見る ▼'}</span>
-                            </button>
-                            {isPastOrdersOpen && (
-                                pastOrders.length === 0 ? <div className="text-center py-10 bg-gray-50 rounded-xl text-gray-500 text-sm border border-gray-200">指定した期間の履歴はありません。</div> : (
-                                    <div className="space-y-2 mt-2">
-                                        {pastOrders.map(order => {
-                                            const isCancelled = order.status === 'キャンセル';
-                                            return (
-                                                <div key={order.id} className={`bg-white border p-3 rounded-lg shadow-sm ${isCancelled ? 'border-gray-300 opacity-60' : 'border-gray-200'}`}>
-                                                    <div className="flex justify-between items-center opacity-80 mb-2">
-                                                        <div>
-                                                            <div className="font-bold text-gray-700 text-sm mb-1 flex items-center gap-1">{isCancelled && <Icons.XCircle className="w-4 h-4 text-red-500" />}{order.deliveryMethod === '配送' && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1 py-0.5 rounded font-bold">配送</span>}{order.storeName || order.userName} 様 <span className="text-xs font-normal text-gray-400 ml-1">({order.orderDate})</span></div>
-                                                            <div className="text-xs text-gray-500 mb-1.5">{order.itemsList && order.itemsList.map(i => `${i.name}×${i.qty}`).join(', ')}</div>
-                                                            <div className="flex gap-1">{order.senmuChecked && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded font-bold">専務確認済</span>}{order.cafeChecked && <span className="text-[9px] bg-orange-50 text-orange-600 border border-orange-200 px-1.5 py-0.5 rounded font-bold">カフェ確認済</span>}{!isCancelled && <button type="button" onClick={() => toggleCheck(order.id, 'paid', !order.paidChecked)} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${order.paidChecked ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-600 border-red-200'}`}>{order.paidChecked ? '集金済' : '未集金（タップで集金済に）'}</button>}</div>
-                                                        </div>
-                                                        <div className="text-right flex flex-col items-end gap-1">
-                                                            <div className={`font-bold text-sm ${isCancelled ? 'text-gray-500 line-through' : 'text-gray-800'}`}>¥{Number(order.totalPrice || 0).toLocaleString()}</div>
-                                                            {!isCancelled && <button type="button" onClick={() => toggleOrderStatus(order.id, order.status)} className="text-[10px] font-bold text-gray-500 bg-gray-50 px-2 py-1 rounded border active:bg-gray-200 mt-1">戻す</button>}
-                                                            {isCancelled && <span className="text-[10px] font-bold text-red-500 border border-red-200 bg-red-50 px-2 rounded">キャンセル済</span>}
-                                                        </div>
-                                                    </div>
-                                                    {!isCancelled && (
-                                                        <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
-                                                            <button type="button" onClick={() => openPrintPreview(order, 'invoice')} className="text-[10px] font-bold text-gray-500 border border-gray-300 bg-white px-2 py-1 rounded flex items-center gap-1 active:bg-gray-50"><Icons.FileText className="w-3.5 h-3.5"/>納品書</button>
-                                                            <button type="button" onClick={() => openPrintPreview(order, 'receipt')} className="text-[10px] font-bold text-gray-500 border border-gray-300 bg-white px-2 py-1 rounded flex items-center gap-1 active:bg-gray-50"><Icons.FileText className="w-3.5 h-3.5"/>領収書</button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )
-                                        })}
+                                    ))}
+
+                                <div className="pt-2">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h3 className="font-bold text-gray-900">済んだ注文</h3>
+                                        <input type="month" value={viewStartMonth} onChange={e => { if (e.target.value) { setViewStartMonth(e.target.value); setViewEndMonth(e.target.value); } }} className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold text-gray-700 min-w-0 appearance-none" />
                                     </div>
-                                )
-                            )}
+                                    <div className="flex gap-1.5 mb-2 text-xs font-bold overflow-x-auto">
+                                        {[['all', 'すべて'], ['unpaid', '未集金'], ['done', 'お渡し済'], ['cancel', 'キャンセル']].map(([k, l]) => (
+                                            <button key={k} type="button" onClick={() => setDoneFilter(k)} className={`px-3 py-1.5 rounded-full whitespace-nowrap border ${doneFilter === k ? 'bg-gray-900 text-white border-gray-900' : k === 'unpaid' && doneCounts.unpaid ? 'bg-white text-red-600 border-red-200' : 'bg-white text-gray-600 border-gray-200'}`}>{l} {doneCounts[k]}</button>
+                                        ))}
+                                    </div>
+                                    {doneShown.length === 0 ? <div className="text-center py-6 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">この月の注文はありません</div>
+                                        : <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">{doneShown.map(o => orderRow(o, true))}</div>}
+                                    <div className="flex gap-2 mt-2">
+                                        <button type="button" onClick={() => openBulkPrintPreview('invoice')} className="flex-1 bg-white border border-gray-200 rounded-xl py-2 text-xs font-bold text-gray-600">🧾 この月の納品書をまとめて</button>
+                                        <button type="button" onClick={() => openBulkPrintPreview('receipt')} className="flex-1 bg-white border border-gray-200 rounded-xl py-2 text-xs font-bold text-gray-600">🧾 この月の領収書をまとめて</button>
+                                    </div>
+                                </div>
+                            </>)}
                         </div>
-                    </div>
-                    {/* iPad・PC：右側に詳細 */}
-                    <aside className="hidden lg:block flex-1 sticky top-20">
-                        {selectedOrder ? renderOrderCard(selectedOrder) : (
-                            <div className="bg-white rounded-xl border border-dashed border-gray-300 p-10 text-center text-gray-400">
-                                <img src="images/logo.png" alt="" className="w-20 h-20 object-contain mx-auto opacity-60" />
-                                <p className="mt-2 text-sm">左の一覧から注文を選ぶと、ここに詳細が出ます</p>
-                            </div>
-                        )}
-                    </aside>
+
+                        {/* iPad・PC：右側に詳細 */}
+                        <aside className="hidden lg:block flex-1 sticky top-20">
+                            {selectedOrder ? renderOrderDetail(selectedOrder) : (
+                                <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-10 text-center text-gray-400">
+                                    <img src="images/logo.png" alt="" className="w-20 h-20 object-contain mx-auto opacity-60" />
+                                    <p className="mt-2 text-sm">左の一覧から注文を選ぶと、ここに詳細が出ます</p>
+                                </div>
+                            )}
+                        </aside>
                     </div>
                 );
             };
 
-            const renderInventoryTab = () => (
-                <div className="animate-slide-up space-y-6 relative z-10">
-                    <div className="flex justify-between items-end border-l-4 border-nanairo-dark pl-2">
-                        <h1 className="text-xl font-bold text-gray-800">在庫</h1>
-                        <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
-                    </div>
-
-                    <p className="text-xs text-gray-500 -mt-3">商品をタップして、収穫・販売・ロスを記録します。</p>
-                    <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                        {products.map(p => (
-                            <button key={p.id} type="button" onClick={() => openStockSheet(p.id)} className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left active:scale-[0.98] transition-transform shadow-sm">
-                                {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
-                                <div className="p-2 flex items-end justify-between gap-1">
-                                    <div className="min-w-0"><div className="font-bold text-sm text-gray-900 truncate">{p.name}</div><div className="text-xs text-gray-500">{p.weight}</div></div>
-                                    <span className={`text-2xl font-bold leading-none ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500' : 'text-gray-900'}`}>{p.stock}</span>
-                                </div>
-                            </button>
-                        ))}
-                    </section>
-
-                    <button type="button" onClick={() => setShowBulkLossModal(true)} className="w-full bg-white text-red-600 border border-red-200 rounded-xl py-3 font-bold text-sm active:bg-red-50 flex justify-center items-center gap-2">
-                        <Icons.AlertTriangle className="w-4 h-4"/> 今ある在庫をすべてロスにする
-                    </button>
-
-
-                    <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
-                        <h2 className="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2"><Icons.History className="w-4 h-4 text-gray-500" /> 最近の記録</h2>
-                        <div className="space-y-2">
-                            {stockLogs.length === 0 ? <p className="text-xs text-gray-500 text-center py-4">履歴はありません</p> : (
-                                stockLogs.map((log) => {
-                                    const isCancelled = log.status === '取消';
-                                    const typeColor = log.type === '収穫' ? 'text-green-600 bg-green-50' : log.type === '店頭販売' ? 'text-blue-600 bg-blue-50' : 'text-red-600 bg-red-50';
+            // 在庫タブ
+            const STOCK_TYPES = [['add', '🌱 収穫', 'bg-nanairo-dark'], ['sale', '🛒 販売', 'bg-blue-600'], ['remove', '🗑 ロス', 'bg-red-500']];
+            const LOG_META = {
+                '収穫': ['🌱', 'bg-nanairo-light', 'text-nanairo-dark', '+'], '店頭販売': ['🛒', 'bg-blue-50', 'text-blue-600', '−'], 'ロス': ['🗑', 'bg-red-50', 'text-red-500', '−'],
+                '委託納品': ['🏪', 'bg-orange-50', 'text-orange-600', '−'], '委託ロス': ['🏪', 'bg-orange-50', 'text-orange-600', ''], '納品取消': ['↩', 'bg-gray-100', 'text-gray-600', '+'], '精算取消': ['↩', 'bg-gray-100', 'text-gray-600', '']
+            };
+            const renderInventoryTab = () => {
+                const suggest = (id) => { const r = insights && insights.products ? insights.products.find(x => x.id === id) : null; return r ? r.suggestedWeekly : null; };
+                if (bulkMode) {
+                    const cur = STOCK_TYPES.find(t => t[0] === bulkType);
+                    const picked = products.filter(p => (bulkQty[p.id] || 0) > 0);
+                    const total = picked.reduce((a, p) => a + bulkQty[p.id], 0);
+                    const setQ = (id, v) => setBulkQty(prev => ({ ...prev, [id]: Math.max(0, v) }));
+                    return (
+                        <div className="space-y-3 pb-20">
+                            <button type="button" onClick={() => { setBulkMode(false); setBulkQty({}); }} className="text-sm font-bold text-nanairo-dark">‹ 在庫にもどる</button>
+                            <div className="flex items-center justify-between"><h2 className="text-lg font-bold text-gray-900">まとめて入力</h2><span className="text-xs text-gray-500">{shortDate(todayStr)}</span></div>
+                            <div className="grid grid-cols-3 gap-1 bg-gray-100 rounded-xl p-1 text-sm font-bold">
+                                {STOCK_TYPES.map(([k, label, bg]) => <button key={k} type="button" onClick={() => setBulkType(k)} className={`rounded-lg py-2.5 ${bulkType === k ? `${bg} text-white shadow-sm` : 'text-gray-600'}`}>{label}</button>)}
+                            </div>
+                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                                <div className="flex items-center gap-2 px-3 py-2 text-[11px] font-bold text-gray-500"><span className="flex-1">商品</span><span className="w-10 text-center">在庫</span>{bulkType === 'add' && <span className="w-10 text-center">目安</span>}<span className="w-32 text-center">{cur[1].slice(2)}する数</span></div>
+                                {products.map(p => {
+                                    const v = bulkQty[p.id] || 0;
+                                    const over = bulkType !== 'add' && v > p.stock;
                                     return (
-                                        <div key={log.rowIndex} className={`border rounded-lg p-2.5 flex items-center justify-between shadow-sm transition-opacity ${isCancelled ? 'border-gray-200 opacity-50 bg-gray-50' : 'border-gray-200 bg-white'}`}>
-                                            <div>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isCancelled ? 'bg-gray-200 text-gray-500' : typeColor}`}>{log.type}</span>
-                                                    <span className="text-xs font-bold text-gray-800">{log.name}</span><span className="text-xs font-bold text-gray-600">{log.amount}P</span>
-                                                </div>
-                                                <div className="text-[10px] text-gray-500">{log.date} {log.memo && `- ${log.memo}`}</div>
+                                        <div key={p.id} className="flex items-center gap-2 px-3 py-2">
+                                            <span className="flex-1 text-sm font-bold text-gray-900 truncate">{p.name}</span>
+                                            <span className={`w-10 text-center text-sm ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500 font-bold' : 'text-gray-700'}`}>{p.stock}</span>
+                                            {bulkType === 'add' && <span className="w-10 text-center text-xs text-gray-400">{suggest(p.id) != null ? suggest(p.id) : '-'}</span>}
+                                            <div className="w-32 flex items-center justify-between">
+                                                <button type="button" onClick={() => setQ(p.id, v - 1)} className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-500"><Icons.Minus className="w-4 h-4" /></button>
+                                                <input type="number" inputMode="numeric" min="0" value={v || ''} placeholder="0" onChange={e => setQ(p.id, parseInt(e.target.value, 10) || 0)} className={`w-12 text-center font-bold outline-none bg-transparent ${over ? 'text-red-600' : v ? 'text-nanairo-dark' : 'text-gray-300'}`} />
+                                                <button type="button" onClick={() => setQ(p.id, v + 1)} className="w-8 h-8 rounded-full bg-nanairo-dark text-white flex items-center justify-center"><Icons.Plus className="w-4 h-4" /></button>
                                             </div>
-                                            {!isCancelled && <button type="button" onClick={() => setCancelTargetLog(log)} className="text-[10px] font-bold text-red-500 bg-white border border-red-200 px-2 py-1.5 rounded shadow-sm active:bg-red-50">取消</button>}
-                                            {isCancelled && <span className="text-[10px] font-bold text-gray-500">取消済</span>}
                                         </div>
-                                    )
-                                })
+                                    );
+                                })}
+                            </div>
+                            {bulkType === 'add' && insights && insights.products && (
+                                <button type="button" onClick={() => { const next = {}; products.forEach(p => { const s = suggest(p.id); if (s) next[p.id] = s; }); setBulkQty(next); }} className="w-full text-right text-xs font-bold text-nanairo-dark">目安の数をまとめて入れる</button>
                             )}
+                            <div className="fixed left-0 right-0 bottom-[76px] lg:bottom-0 z-30 mx-auto w-full max-w-[600px] lg:max-w-[1120px] px-4 py-3 bg-gradient-to-t from-gray-100 to-transparent">
+                                <button type="button" onClick={submitBulk} disabled={bulkRunning || picked.length === 0} className={`w-full rounded-xl py-3.5 text-white font-bold shadow-lg flex justify-center items-center gap-2 ${bulkRunning || picked.length === 0 ? 'bg-gray-300' : cur[2]}`}>
+                                    {bulkRunning ? <><div className="spinner"></div> 記録中… {bulkProgress}/{picked.length}</> : picked.length === 0 ? '数を入れてください' : `${picked.length}商品・${cur[1].slice(2)} ${total} をまとめて記録`}
+                                </button>
+                            </div>
                         </div>
-                    </section>
-                </div>
-            );
+                    );
+                }
+
+                // 最近の記録（日ごと）
+                const md = (offset) => new Date(Date.now() + 9 * 3600 * 1000 - offset * 86400000).toISOString().slice(5, 10).replace('-', '/');
+                const dayLabel = (d) => d === md(0) ? '今日' : d === md(1) ? '昨日' : d.replace(/^0/, '').replace('/0', '/');
+                const logGroups = [];
+                stockLogs.forEach(log => {
+                    const d = String(log.date).slice(0, 5);
+                    let g = logGroups.find(x => x.d === d);
+                    if (!g) logGroups.push(g = { d, list: [] });
+                    g.list.push(log);
+                });
+                return (
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h1 className="text-lg font-bold text-gray-900">在庫</h1>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => { setBulkType('add'); setBulkMode(true); }} className="text-sm font-bold text-white bg-nanairo-dark rounded-full px-4 py-2">まとめて入力</button>
+                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full border border-gray-200 text-gray-500"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
+                            </div>
+                        </div>
+                        <p className="text-xs text-gray-500 -mt-2">商品をタップして1つずつ、または「まとめて入力」で全商品を一度に記録します。</p>
+                        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                            {products.map(p => (
+                                <button key={p.id} type="button" onClick={() => openStockSheet(p.id)} className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left active:scale-[0.98] transition-transform">
+                                    {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
+                                    <div className="p-2 flex items-end justify-between gap-1">
+                                        <div className="min-w-0"><div className="font-bold text-sm text-gray-900 truncate">{p.name}</div><div className="text-xs text-gray-500">{p.weight}</div></div>
+                                        <span className={`text-2xl font-bold leading-none ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500' : 'text-gray-900'}`}>{p.stock}</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </section>
+
+                        <div>
+                            <h3 className="font-bold text-gray-900 mb-1">最近の記録</h3>
+                            {logGroups.length === 0 ? <div className="text-center py-6 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">記録はありません</div> : logGroups.map(g => (
+                                <div key={g.d} className="mt-2">
+                                    <div className="text-xs font-bold text-gray-500 mb-1.5">{dayLabel(g.d)}</div>
+                                    <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                                        {g.list.map(log => {
+                                            const meta = LOG_META[log.type] || ['•', 'bg-gray-100', 'text-gray-600', ''];
+                                            const cancelled = log.status === '取消';
+                                            const canUndo = !cancelled && ['収穫', '店頭販売', 'ロス'].includes(log.type);
+                                            return (
+                                                <div key={log.rowIndex} className={`flex items-center gap-3 px-3 py-2.5 ${cancelled ? 'opacity-40' : ''}`}>
+                                                    <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${meta[1]}`}>{meta[0]}</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className={`text-sm ${cancelled ? 'line-through' : ''}`}><b>{log.name}</b> <span className={`font-bold ${meta[2]}`}>{meta[3]}{log.amount}</span></div>
+                                                        <div className="text-xs text-gray-500 truncate">{log.type}・{String(log.date).slice(6)}{log.memo ? `　${log.memo}` : ''}{cancelled ? '（取り消し済み）' : ''}</div>
+                                                    </div>
+                                                    {canUndo && <button type="button" onClick={() => setCancelTargetLog(log)} className="text-xs text-gray-400 underline shrink-0">取り消す</button>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <button type="button" onClick={() => setShowBulkLossModal(true)} className="w-full bg-white text-red-600 border border-red-200 rounded-xl py-3 font-bold text-sm flex justify-center items-center gap-2">
+                            <Icons.AlertTriangle className="w-4 h-4" /> 今ある在庫をすべてロスにする
+                        </button>
+                    </div>
+                );
+            };
+
+            // お客様タブ
+            const renderCustomersTab = () => {
+                const sel = customerList.find(c => c.key === selectedCustomerKey);
+                if (sel) {
+                    const monthOrders = sel.orders.filter(o => inViewPeriod(o) && o.status === '受渡済'); // 請求はお渡し済みの分だけ
+                    const unpaidList = sel.orders.filter(isUnpaid);
+                    const history = sel.orders.slice().sort((a, b) => String(b.pickupDate).localeCompare(String(a.pickupDate)));
+                    return (
+                        <div className="space-y-3 max-w-[600px]">
+                            <button type="button" onClick={() => setSelectedCustomerKey(null)} className="text-sm font-bold text-nanairo-dark">‹ お客様の一覧</button>
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">{sel.name}</h2>
+                                <div className="text-xs text-gray-500">{sel.storeName ? `${sel.userName} 様・` : ''}{sel.first ? `初回 ${shortDate(sel.first)}` : ''}{sel.key.startsWith('name:') ? '・LINE以外の登録' : ''}</div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="bg-white rounded-2xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">利用</div><b>{sel.count}回</b></div>
+                                <div className="bg-white rounded-2xl border border-gray-200 py-2"><div className="text-[10px] text-gray-500">合計</div><b>¥{sel.spend.toLocaleString()}</b></div>
+                                <div className={`bg-white rounded-2xl border py-2 ${sel.unpaid ? 'border-red-200' : 'border-gray-200'}`}><div className="text-[10px] text-gray-500">未集金</div><b className={sel.unpaid ? 'text-red-600' : ''}>¥{sel.unpaid.toLocaleString()}</b></div>
+                            </div>
+                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 text-sm">
+                                {sel.phone && <div className="flex items-center gap-3 px-4 py-2.5"><span>📞</span><span className="flex-1">{sel.phone}</span><a href={`tel:${sel.phone}`} className="text-xs font-bold text-nanairo-dark">発信</a></div>}
+                                {sel.address && <div className="flex items-center gap-3 px-4 py-2.5"><span>📍</span><span className="flex-1">{sel.address}</span><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent('山形県' + sel.address)}`} target="_blank" rel="noopener" className="text-xs font-bold text-nanairo-dark">地図</a></div>}
+                                {sel.favorites.length > 0 && <div className="flex items-center gap-3 px-4 py-2.5"><span>🛒</span><span className="flex-1">よく買う：{sel.favorites.join('・')}</span></div>}
+                                {sel.avgGap && <div className="flex items-center gap-3 px-4 py-2.5"><span>🔁</span><span className="flex-1">だいたい {sel.avgGap}日ごと・最終 {shortDate(sel.last)}{sel.followUp ? '（声かけ候補）' : ''}</span></div>}
+                            </div>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => openCustomerReport(sel, monthOrders)} className="flex-1 bg-white border border-gray-200 rounded-xl py-2.5 text-xs font-bold text-gray-700">🧾 {Number(viewStartMonth.slice(5))}月の請求書</button>
+                                {unpaidList.length > 0 && <button type="button" onClick={() => openCustomerReport(sel, unpaidList)} className="flex-1 bg-white border border-red-200 rounded-xl py-2.5 text-xs font-bold text-red-600">🧾 未集金分の請求書</button>}
+                            </div>
+                            <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">注文の履歴</b><span className="text-xs text-gray-500">{history.length}件</span></div>
+                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">{history.map(o => orderRow(o, true))}</div>
+                        </div>
+                    );
+                }
+                const q = customerSearch.trim().toLowerCase().replace(/-/g, '');
+                const counts = { all: customerList.length, store: customerList.filter(c => c.storeName).length, unpaid: customerList.filter(c => c.unpaidCount > 0).length, follow: customerList.filter(c => c.followUp).length };
+                const shown = customerList.filter(c => {
+                    if (q && ![c.userName, c.storeName, c.phone].some(v => String(v || '').toLowerCase().replace(/-/g, '').includes(q))) return false;
+                    return customerFilter === 'all' || (customerFilter === 'store' ? c.storeName : customerFilter === 'unpaid' ? c.unpaidCount > 0 : c.followUp);
+                });
+                return (
+                    <div className="space-y-3 max-w-[600px]">
+                        <h1 className="text-lg font-bold text-gray-900">お客様</h1>
+                        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3">
+                            <span className="text-gray-400">🔍</span>
+                            <input type="search" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="お名前・店舗名・電話番号" className="flex-1 min-w-0 py-2.5 text-sm outline-none bg-transparent" />
+                        </div>
+                        <div className="flex gap-1.5 text-xs font-bold overflow-x-auto">
+                            {[['all', 'すべて', 'bg-white text-gray-600 border-gray-200'], ['store', 'お店', 'bg-white text-gray-600 border-gray-200'], ['unpaid', '未集金', 'bg-white text-red-600 border-red-200'], ['follow', '声かけ', 'bg-white text-blue-700 border-blue-200']].map(([k, l, cls]) => (
+                                <button key={k} type="button" onClick={() => setCustomerFilter(k)} className={`px-3 py-1.5 rounded-full whitespace-nowrap border ${customerFilter === k ? 'bg-gray-900 text-white border-gray-900' : cls}`}>{l} {counts[k]}</button>
+                            ))}
+                        </div>
+                        {shown.length === 0 ? <div className="text-center py-8 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">該当するお客様はいません</div> : (
+                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                                {shown.map(c => (
+                                    <button key={c.key} type="button" onClick={() => setSelectedCustomerKey(c.key)} className="w-full text-left flex items-center gap-3 px-3 py-3 active:bg-gray-50">
+                                        <span className={`w-9 h-9 rounded-full font-bold flex items-center justify-center shrink-0 ${c.storeName ? 'bg-nanairo-light text-nanairo-dark' : 'bg-gray-100 text-gray-600'}`}>{c.name.slice(0, 1)}</span>
+                                        <div className="flex-1 min-w-0"><b className="text-gray-900">{c.name}</b><div className="text-xs text-gray-500 truncate">{c.storeName ? `${c.userName} 様・` : ''}{c.count}回・¥{c.spend.toLocaleString()}{c.last ? `・最終 ${shortDate(c.last)}` : ''}</div></div>
+                                        {c.unpaidCount > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">未集金</span>}
+                                        {c.followUp && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">声かけ</span>}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <p className="text-xs text-gray-500">LINEの注文から自動で作られます。専務あての個人注文（店頭販売として記録したもの）は含まれません。</p>
+                    </div>
+                );
+            };
+
+            // 未集金・請求
+            const renderReceivables = () => {
+                const unpaid = orders.filter(isUnpaid);
+                const total = unpaid.reduce((a, o) => a + Number(o.totalPrice || 0), 0);
+                const oldest = unpaid.map(o => o.pickupDate).sort()[0];
+                const groups = customerList.filter(c => c.unpaidCount > 0).map(c => ({ ...c, list: c.orders.filter(isUnpaid) }))
+                    .sort((a, b) => a.list[0].pickupDate.localeCompare(b.list[0].pickupDate));
+                const payAll = async (c) => {
+                    for (const o of c.list) await toggleCheck(o.id, 'paid', true);
+                    showMessage(`${c.name}：${c.list.length}件を集金済にしました`);
+                };
+                return (
+                    <div className="space-y-3 max-w-[600px]">
+                        <h2 className="text-lg font-bold text-gray-900">未集金・請求</h2>
+                        <div className={`rounded-2xl border p-4 ${total ? 'bg-red-50/60 border-red-200' : 'bg-white border-gray-200'}`}>
+                            <div className="text-xs text-gray-500">まだ回収していないお金</div>
+                            <div className={`text-3xl font-bold ${total ? 'text-red-600' : 'text-gray-900'}`}>¥{total.toLocaleString()}</div>
+                            <div className="text-xs text-gray-500">{unpaid.length}件{oldest ? `・いちばん古いもの ${shortDate(oldest)}（${daysBetween(oldest, todayStr)}日前）` : ''}</div>
+                        </div>
+                        {groups.length > 0 && <b className="block text-sm text-gray-900 pt-1">お客様ごと（古い順）</b>}
+                        {groups.map(c => (
+                            <div key={c.key} className="bg-white rounded-2xl border border-gray-200 p-3">
+                                <div className="flex justify-between items-start gap-2">
+                                    <div className="min-w-0"><b className="text-gray-900">{c.name}</b><div className="text-xs text-gray-500">{c.list.length}件：{c.list.map(o => shortDate(o.pickupDate)).join('・')}</div></div>
+                                    <b className="text-red-600 whitespace-nowrap">¥{c.list.reduce((a, o) => a + Number(o.totalPrice || 0), 0).toLocaleString()}</b>
+                                </div>
+                                <div className="flex gap-2 mt-2 text-xs font-bold">
+                                    <button type="button" onClick={() => payAll(c)} className="flex-1 py-2 rounded-lg bg-nanairo-dark text-white">集金済にする</button>
+                                    <button type="button" onClick={() => openCustomerReport(c, c.list)} className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700">🧾 請求書</button>
+                                    {c.phone && <a href={`tel:${c.phone}`} className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700">📞</a>}
+                                </div>
+                            </div>
+                        ))}
+                        <div className="bg-white rounded-2xl border border-gray-200 p-3 mt-2">
+                            <div className="flex items-center justify-between"><b className="text-sm text-gray-900">月ごとの書き出し</b>
+                                <input type="month" value={viewStartMonth} onChange={e => { if (e.target.value) { setViewStartMonth(e.target.value); setViewEndMonth(e.target.value); } }} className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold text-gray-700 min-w-0 appearance-none" /></div>
+                            <div className="grid grid-cols-2 gap-2 mt-2 text-xs font-bold">
+                                <button type="button" onClick={downloadCsv} className="py-2.5 rounded-xl border border-gray-200 text-gray-700">⬇ 注文をCSVで保存</button>
+                                <button type="button" onClick={() => openBulkPrintPreview('invoice')} className="py-2.5 rounded-xl border border-gray-200 text-gray-700">🧾 納品書をまとめて</button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">お客様ごとの月締め請求書は「お客様」の台帳から作れます。</p>
+                        </div>
+                    </div>
+                );
+            };
+
+            // その他
+            const renderMoreTab = () => {
+                const back = <button type="button" onClick={() => setMoreView(null)} className="text-sm font-bold text-nanairo-dark mb-2">‹ その他</button>;
+                if (moreView === 'analytics') return <div>{back}{renderAnalyticsTab()}</div>;
+                if (moreView === 'receivables') return <div>{back}{renderReceivables()}</div>;
+                const unpaid = orders.filter(isUnpaid);
+                const items = [
+                    ['analytics', '📊', '分析', '売上・廃棄・商品別・お客様', null],
+                    ['receivables', '💴', '未集金・請求', unpaid.length ? `未集金 ¥${unpaid.reduce((a, o) => a + Number(o.totalPrice || 0), 0).toLocaleString()}（${unpaid.length}件）` : '未集金はありません', unpaid.length || null],
+                    ['products', '🌿', '商品の管理', '追加・価格・販売の停止（準備中）', null],
+                    ['settings', '⚙️', '設定', '配送・送料・休業日（準備中）', null],
+                ];
+                return (
+                    <div className="max-w-[600px]">
+                        <h1 className="text-lg font-bold text-gray-900 mb-2">その他</h1>
+                        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                            {items.map(([k, icon, title, sub, badge]) => {
+                                const ready = k === 'analytics' || k === 'receivables';
+                                return (
+                                    <button key={k} type="button" disabled={!ready} onClick={() => setMoreView(k)} className={`w-full text-left flex items-center gap-3 px-4 py-3.5 ${ready ? 'active:bg-gray-50' : 'opacity-40'}`}>
+                                        <span className="text-xl">{icon}</span>
+                                        <div className="flex-1"><b className="text-gray-900">{title}</b><div className="text-xs text-gray-500">{sub}</div></div>
+                                        {badge ? <span className="text-[11px] font-bold text-white bg-red-500 rounded-full px-2">{badge}</span> : <span className="text-gray-300">›</span>}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            };
 
             const renderAgencyTab = () => {
                 const pendingDeliveries = agencyDeliveries.filter(d => d.status === "納品済");
@@ -1412,6 +1789,10 @@
                 )
             }
 
+            const TABS = [['orders', '注文', Icons.ClipboardList], ['inventory', '在庫', Icons.Box], ['agency', '委託', Icons.Store], ['customers', 'お客様', Icons.User], ['more', 'その他', Icons.BarChart]];
+            const goTab = (k) => { setActiveTab(k); if (k === 'more') setMoreView(null); if (k === 'customers') setSelectedCustomerKey(null); if (k !== 'inventory') setBulkMode(false); };
+            const unpaidBadge = orders.filter(o => o.status === '受渡済' && !o.paidChecked).length;
+
             return (
                 <div className="app-container">
                     <header className="no-print sticky top-0 z-30 bg-white shadow-sm">
@@ -1422,8 +1803,8 @@
                                 <span className="text-[10px] font-bold text-white bg-nanairo-dark px-1.5 py-0.5 rounded">管理</span>
                             </div>
                             <nav className="hidden lg:flex gap-1 text-sm font-bold">
-                                {[['orders', '注文'], ['inventory', '在庫'], ['agency', '委託'], ['analytics', '分析・請求']].map(([k, label]) => (
-                                    <button key={k} type="button" onClick={() => setActiveTab(k)} className={`px-4 py-1.5 rounded-lg ${activeTab === k ? 'bg-nanairo-light text-nanairo-dark' : 'text-gray-500 hover:bg-gray-100'}`}>{label}</button>
+                                {TABS.map(([k, label]) => (
+                                    <button key={k} type="button" onClick={() => goTab(k)} className={`px-4 py-1.5 rounded-lg ${activeTab === k ? 'bg-nanairo-light text-nanairo-dark' : 'text-gray-500 hover:bg-gray-100'}`}>{label}</button>
                                 ))}
                             </nav>
                         </div>
@@ -1441,7 +1822,8 @@
                         {activeTab === 'orders' && renderOrdersTab()}
                         {activeTab === 'inventory' && renderInventoryTab()}
                         {activeTab === 'agency' && renderAgencyTab()}
-                        {activeTab === 'analytics' && renderAnalyticsTab()}
+                        {activeTab === 'customers' && renderCustomersTab()}
+                        {activeTab === 'more' && renderMoreTab()}
                     </main>
 
                     {stockSheetOpen && (() => {
@@ -1482,52 +1864,38 @@
                             </div>
                         );
                     })()}
-                    {(() => { const selectedOrder = orders.find(o => o.id === selectedOrderId); return (<>
-                    {/* スマホ：下から詳細 */}
-                    {selectedOrder && activeTab === 'orders' && (
-                        <div className="lg:hidden fixed inset-0 bg-black/50 z-[60] flex flex-col justify-end" onClick={() => setSelectedOrderId(null)}>
-                            <div className="bg-gray-50 rounded-t-3xl max-h-[90vh] overflow-y-auto p-3 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
-                                <div className="flex justify-between items-center mb-2 px-1">
-                                    <span className="font-bold text-gray-700">注文の詳細</span>
-                                    <button type="button" onClick={() => setSelectedOrderId(null)} className="p-1.5 bg-white rounded-full shadow-sm"><Icons.X className="w-5 h-5" /></button>
+                    {(() => {
+                        const selectedOrder = orders.find(o => o.id === selectedOrderId);
+                        if (!selectedOrder) return null;
+                        return (
+                            <div className={`no-print fixed inset-0 bg-black/50 z-[60] flex flex-col justify-end lg:justify-center lg:items-center ${activeTab === 'orders' ? 'lg:hidden' : ''}`} onClick={() => setSelectedOrderId(null)}>
+                                <div className="relative bg-gray-50 rounded-t-3xl lg:rounded-3xl w-full lg:max-w-[560px] max-h-[92vh] overflow-y-auto p-4 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(20px + env(safe-area-inset-bottom))' }}>
+                                    <div className="flex justify-center mb-2 lg:hidden"><div className="w-10 h-1 rounded-full bg-gray-300"></div></div>
+                                    <button type="button" onClick={() => setSelectedOrderId(null)} className="absolute top-3 right-3 p-1.5 bg-white rounded-full shadow-sm z-10" aria-label="閉じる"><Icons.X className="w-5 h-5" /></button>
+                                    {renderOrderDetail(selectedOrder)}
                                 </div>
-                                {renderOrderCard(selectedOrder)}
                             </div>
-                        </div>
-                    )}
-                    </>); })()}
+                        );
+                    })()}
                     {renderPrintView()}
                     {renderCustomerModal()}
                     {renderAllProductsModal()}
                     {renderAllCustomersModal()}
 
                     <div className="no-print lg:hidden fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[600px] bg-white border-t border-gray-200 flex h-[76px] z-40 pb-[env(safe-area-inset-bottom)] box-border">
-                        <button type="button" onClick={() => setActiveTab('orders')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'orders' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
-                            <div className="relative">
-                                <Icons.ClipboardList className="w-6 h-6" />
-                                {orders.filter(o=>o.status==='未対応').length > 0 && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
-                                )}
-                            </div>
-                            <span className="text-[11px] font-bold">注文</span>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('inventory')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'inventory' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
-                            <Icons.Box className="w-6 h-6" />
-                            <span className="text-[11px] font-bold">在庫</span>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('agency')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'agency' ? 'text-agency' : 'text-gray-400'}`}>
-                            <div className="relative">
-                                <Icons.Store className="w-6 h-6" />
-                                {agencyDeliveries && agencyDeliveries.filter(d => d.status === "納品済").length > 0 && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-agency rounded-full border-2 border-white"></div>
-                                )}
-                            </div>
-                            <span className="text-[11px] font-bold">委託</span>
-                        </button>
-                        <button type="button" onClick={() => setActiveTab('analytics')} className={`flex-1 flex flex-col items-center justify-center gap-1.5 ${activeTab === 'analytics' ? 'text-blue-600' : 'text-gray-400'}`}>
-                            <Icons.TrendingUp className="w-6 h-6" />
-                            <span className="text-[11px] font-bold">分析・請求</span>
-                        </button>
+                        {TABS.map(([k, label, Icon]) => {
+                            const dot = k === 'orders' ? orders.some(o => o.status === '未対応') : k === 'agency' ? (agencyDeliveries || []).some(d => d.status === '納品済') : false;
+                            return (
+                                <button key={k} type="button" onClick={() => goTab(k)} className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === k ? 'text-nanairo-dark' : 'text-gray-400'}`}>
+                                    <div className="relative">
+                                        <Icon className="w-6 h-6" />
+                                        {dot && <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>}
+                                        {k === 'more' && unpaidBadge > 0 && <div className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white">{unpaidBadge}</div>}
+                                    </div>
+                                    <span className="text-[11px] font-bold">{label}</span>
+                                </button>
+                            );
+                        })}
                     </div>
 
                     {showBulkLossModal && (
