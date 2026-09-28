@@ -628,6 +628,25 @@
                 const isCurrentMonth = viewStartMonth === todayMonth;
                 const activeOrders = orders.filter(o => o.status === '未対応' || o.status === '準備完了') || [];
                 const pastOrders = orders.filter(o => (o.status === '受渡済' || o.status === 'キャンセル') && inViewPeriod(o));
+                // 配送日ごとのルート（今日以降・未配達の配送のみ）。出発地は現在地、市町村ごとにまとめて並べる
+                const AREA_ORDER = ["鶴岡市", "三川町", "庄内町", "酒田市", "遊佐町"];
+                const areaRank = (addr) => { const i = AREA_ORDER.findIndex(a => String(addr).startsWith(a)); return i < 0 ? 99 : i; };
+                const routeByDate = {};
+                activeOrders.filter(o => o.deliveryMethod === '配送' && o.address && o.pickupDate >= todayStr).forEach(o => {
+                    (routeByDate[o.pickupDate] = routeByDate[o.pickupDate] || []).push(o);
+                });
+                const deliveryRoutes = Object.keys(routeByDate).sort().map(date => {
+                    const stops = [...new Set(routeByDate[date]
+                        .sort((a, b) => areaRank(a.address) - areaRank(b.address) || a.address.localeCompare(b.address, 'ja'))
+                        .map(o => '山形県' + o.address))];
+                    const dest = stops[stops.length - 1];
+                    const waypoints = stops.slice(0, -1);
+                    const url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest)
+                        + (waypoints.length ? '&waypoints=' + encodeURIComponent(waypoints.join('|')) : '');
+                    const [, m, d] = date.split('-').map(Number);
+                    const label = date === todayStr ? `今日（${m}/${d}）` : `${m}/${d}（${'日月火水木金土'[new Date(date + 'T00:00:00+09:00').getDay()]}）`;
+                    return { date, url, label, count: routeByDate[date].length };
+                });
 
                 return (
                     <div className="animate-slide-up space-y-5 relative z-10">
@@ -653,6 +672,17 @@
                                     <h1 className="text-xl font-bold text-gray-800">注文対応</h1>
                                     <span className="text-sm font-bold text-nanairo-dark bg-nanairo-light px-2 py-1 rounded">未対応: {activeOrders.filter(o=>o.status==='未対応').length}件</span>
                                 </div>
+                                {/* ★配送ルート：配送日ごとに、Googleマップで配送先を順番に回る道案内を開く */}
+                                {deliveryRoutes.length > 0 && (
+                                    <div className="flex flex-col gap-2">
+                                        {deliveryRoutes.map(r => (
+                                            <a key={r.date} href={r.url} target="_blank" rel="noopener" className="flex items-center justify-between bg-blue-600 text-white rounded-xl px-4 py-3 font-bold text-sm shadow-sm active:bg-blue-700">
+                                                <span className="flex items-center gap-2"><Icons.MapPin className="w-5 h-5" />{r.label} の配送ルートを開く</span>
+                                                <span className="text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">{r.count}件</span>
+                                            </a>
+                                        ))}
+                                    </div>
+                                )}
                                 <div className="space-y-4">
                                     {activeOrders.map(order => (
                                         <div key={order.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
