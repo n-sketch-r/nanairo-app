@@ -155,6 +155,9 @@
             const [searchCustomer, setSearchCustomer] = useState("");
             const [showCustomerModal, setShowCustomerModal] = useState(null); 
             const [chartType, setChartType] = useState('line');
+            const [insights, setInsights] = useState(null); // ★分析強化
+            const [trendHover, setTrendHover] = useState(null);
+            const [showTrendTable, setShowTrendTable] = useState(false);
 
             // 印刷・月次請求書用
             const [printOrders, setPrintOrders] = useState([]); 
@@ -184,6 +187,7 @@
                     if (data.products) setProducts(data.products.filter(p => p.name !== "なないろ菜"));
                     if (data.orders) setOrders(data.orders);
                     if (data.analytics) setAnalytics(data.analytics);
+                    setInsights(data.insights || null);
                     if (data.stockLogs) setStockLogs(data.stockLogs);
                     if (data.agencies) setAgencies(data.agencies);
                     if (data.agencyPrices) setAgencyPrices(data.agencyPrices);
@@ -280,7 +284,7 @@
             };
 
             const openPrintPreview = (order, type) => {
-                setPrintOrders([order]); setPrintType(type); setPrintName(order.userName || '');
+                setPrintOrders([order]); setPrintType(type); setPrintName(order.storeName || order.userName || '');
             };
 
             const openMonthlyReportPreview = (customer) => {
@@ -531,7 +535,7 @@
                         </div>
                         <div className="p-4 sm:p-8 mt-4 overflow-x-auto flex-1">
                             {printOrders.map((order, index) => {
-                                const targetName = printOrders.length === 1 ? printName : (order.userName || '');
+                                const targetName = printOrders.length === 1 ? printName : (order.storeName || order.userName || '');
                                 return (
                                     <div key={order.id} className="page-break bg-white p-8 sm:p-12 shadow-sm rounded-lg border border-gray-200 mb-8 w-[800px] min-w-[800px] max-w-[800px] mx-auto text-gray-800 relative min-h-[250mm] pt-12 print:w-full print:min-w-0 print:max-w-none">
                                         <div className="text-right text-sm text-gray-500 mb-6">発行日: {todayText}<br/><span className="font-bold">登録番号: T390001016462</span></div>
@@ -623,7 +627,7 @@
                                             <div className="p-4">
                                                 <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-3">
                                                     <div>
-                                                        <div className="font-bold text-gray-800 text-lg flex items-center gap-2">{order.userName} 様</div>
+                                                        <div className="font-bold text-gray-800 text-lg flex items-center gap-2">{order.storeName ? <>{order.storeName}<span className="text-xs font-normal text-gray-500">（{order.userName} 様）</span></> : <>{order.userName} 様</>}</div>
                                                         {order.deliveryMethod === '配送' ? (
                                                             <div className="text-sm text-blue-600 font-bold mt-1 flex items-center gap-1"><Icons.Truck className="w-4 h-4"/> 配送: {order.pickupDate} {order.pickupTime}</div>
                                                         ) : (
@@ -689,7 +693,7 @@
                                                 <div key={order.id} className={`bg-white border p-3 rounded-lg shadow-sm ${isCancelled ? 'border-gray-300 opacity-60' : 'border-gray-200'}`}>
                                                     <div className="flex justify-between items-center opacity-80 mb-2">
                                                         <div>
-                                                            <div className="font-bold text-gray-700 text-sm mb-1 flex items-center gap-1">{isCancelled && <Icons.XCircle className="w-4 h-4 text-red-500" />}{order.deliveryMethod === '配送' && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1 py-0.5 rounded font-bold">配送</span>}{order.userName} 様 <span className="text-xs font-normal text-gray-400 ml-1">({order.orderDate})</span></div>
+                                                            <div className="font-bold text-gray-700 text-sm mb-1 flex items-center gap-1">{isCancelled && <Icons.XCircle className="w-4 h-4 text-red-500" />}{order.deliveryMethod === '配送' && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1 py-0.5 rounded font-bold">配送</span>}{order.storeName || order.userName} 様 <span className="text-xs font-normal text-gray-400 ml-1">({order.orderDate})</span></div>
                                                             <div className="text-xs text-gray-500 mb-1.5">{order.itemsList && order.itemsList.map(i => `${i.name}×${i.qty}`).join(', ')}</div>
                                                             <div className="flex gap-1">{order.senmuChecked && <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded font-bold">専務確認済</span>}{order.cafeChecked && <span className="text-[9px] bg-orange-50 text-orange-600 border border-orange-200 px-1.5 py-0.5 rounded font-bold">カフェ確認済</span>}</div>
                                                         </div>
@@ -912,45 +916,36 @@
                 const periodText = isSingleMonth ? formatMonth(viewStartMonth) : `${formatMonth(viewStartMonth)} 〜 ${formatMonth(viewEndMonth)}`;
 
                 const anData = analytics || {};
-                const topProducts = anData.topProducts || [];
                 const topCustomers = anData.topCustomers || [];
-                const stockStats = anData.stockStats || [];
+                const I = insights;
+                const yen = (n) => `¥${Math.round(Number(n || 0)).toLocaleString()}`;
+                const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+                // 系列の色（識別用・固定順）：LINE注文 / 店頭販売 / 委託
+                const CH = [
+                    { key: 'line', label: 'LINE注文', color: '#16a34a' },
+                    { key: 'store', label: '店頭販売', color: '#2563eb' },
+                    { key: 'agency', label: '委託', color: '#f97316' }
+                ];
 
-                // 外部ライブラリを使わない、絶対にクラッシュしない独自データ生成ロジック
-                let directTotal = 0; let agencyTotal = 0;
-                orders.forEach(o => {
-                    if(o.status !== 'キャンセル' && o.pickupDate && String(o.pickupDate) >= `${viewStartMonth}-01` && String(o.pickupDate) <= `${viewEndMonth}-31`) directTotal += Number(o.totalPrice || 0);
-                });
-                agencyDeliveries.forEach(d => {
-                    if(d.status === '精算済' && d.date && String(d.date) >= `${viewStartMonth}-01` && String(d.date) <= `${viewEndMonth}-31`) agencyTotal += Math.floor(Number(d.pureSalesExTax || 0) * 1.08);
-                });
-                const totalCombinedSales = directTotal + agencyTotal;
-                const directRatio = totalCombinedSales > 0 ? (directTotal / totalCombinedSales) * 100 : 0;
-                const agencyRatio = totalCombinedSales > 0 ? (agencyTotal / totalCombinedSales) * 100 : 0;
+                const Delta = ({ cur, prev, unit = '%', inverse = false, pt = false }) => {
+                    if (prev == null || cur == null || (!pt && !prev)) return <span className="text-[10px] text-gray-400">前期比 —</span>;
+                    const d = pt ? (cur - prev) : Math.round((cur - prev) / prev * 100);
+                    if (d === 0) return <span className="text-[10px] text-gray-500">前期比 ±0{pt ? 'pt' : unit}</span>;
+                    const good = inverse ? d < 0 : d > 0;
+                    return <span className={`text-[10px] font-bold ${good ? 'text-green-700' : 'text-red-600'}`}>{d > 0 ? '▲' : '▼'} {Math.abs(d)}{pt ? 'pt' : unit} <span className="font-normal text-gray-500">前期比</span></span>;
+                };
 
-                // 日別データの集計
-                const daysMap = {};
-                orders.forEach(o => {
-                    if(o.status === 'キャンセル' || !o.pickupDate) return;
-                    const pDate = String(o.pickupDate);
-                    if(pDate >= `${viewStartMonth}-01` && pDate <= `${viewEndMonth}-31`) {
-                        if(!daysMap[pDate]) daysMap[pDate] = { date: pDate, direct: 0, agency: 0 };
-                        daysMap[pDate].direct += Number(o.totalPrice || 0);
-                    }
-                });
-                agencyDeliveries.forEach(d => {
-                    if(d.status !== '精算済' || !d.date) return;
-                    const dDate = String(d.date);
-                    if(dDate >= `${viewStartMonth}-01` && dDate <= `${viewEndMonth}-31`) {
-                        if(!daysMap[dDate]) daysMap[dDate] = { date: dDate, direct: 0, agency: 0 };
-                        daysMap[dDate].agency += Math.floor(Number(d.pureSalesExTax || 0) * 1.08);
-                    }
-                });
-                const dailyData = Object.values(daysMap).sort((a, b) => a.date.localeCompare(b.date));
-                const maxDailySales = dailyData.length > 0 ? Math.max(...dailyData.map(d => d.direct + d.agency)) : 1;
+                const Kpi = ({ label, value, sub, children, tone }) => (
+                    <div className={`p-3.5 rounded-xl border shadow-sm ${tone === 'bad' ? 'bg-red-50/60 border-red-200' : 'bg-white border-gray-200'}`}>
+                        <div className={`text-[11px] font-bold mb-1 ${tone === 'bad' ? 'text-red-700' : 'text-gray-500'}`}>{label}</div>
+                        <div className={`text-xl font-bold tracking-tight ${tone === 'bad' ? 'text-red-800' : 'text-gray-900'}`}>{value}</div>
+                        {sub && <div className="text-[10px] text-gray-500 mt-0.5">{sub}</div>}
+                        <div className="mt-1">{children}</div>
+                    </div>
+                );
 
-                return (
-                    <div className="animate-slide-up space-y-5 relative z-10">
+                const header = (
+                    <>
                         <div className="flex justify-between items-center mb-4">
                             <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm w-fit">
                                 <Icons.Calendar className="w-4 h-4 text-gray-500" />
@@ -962,138 +957,236 @@
                                 <Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} />
                             </button>
                         </div>
-
                         <div className="flex justify-between items-end border-l-4 border-blue-600 pl-2">
-                            <h1 className="text-xl font-bold text-gray-800">ダッシュボード</h1>
-                            <span className="text-xs font-bold text-gray-500">{periodText}</span>
+                            <h1 className="text-xl font-bold text-gray-800">経営ダッシュボード</h1>
+                            <span className="text-xs font-bold text-gray-500">{periodText}{I ? `（前期：${formatMonth(I.period.prevStart)}${I.period.prevStart !== I.period.prevEnd ? '〜' + formatMonth(I.period.prevEnd) : ''}）` : ''}</span>
                         </div>
-                        
-                        <div className="grid grid-cols-2 gap-3 relative">
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-xs text-gray-500 font-bold mb-1 flex items-center gap-1"><Icons.TrendingUp className="w-3 h-3"/> 指定期間の総売上</div>
-                                <div className="text-2xl font-bold text-gray-900 tracking-tight">¥{Number(anData.monthlySales || 0).toLocaleString()}</div>
-                                <div className="text-[9px] text-gray-400 mt-1">※店頭販売・委託販売含む</div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-xs text-gray-500 font-bold mb-1 flex items-center gap-1"><Icons.ClipboardList className="w-3 h-3"/> 注文・販売件数</div>
-                                <div className="text-2xl font-bold text-gray-900 tracking-tight">{Number(anData.orderCount || 0)} <span className="text-sm font-normal text-gray-500">件</span></div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-xs text-gray-500 font-bold mb-1 flex items-center gap-1"><Icons.User className="w-3 h-3"/> 平均客単価</div>
-                                <div className="text-xl font-bold text-gray-900 tracking-tight">¥{Number(anData.averageSpend || 0).toLocaleString()}</div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-red-100 bg-red-50/30">
-                                <div className="text-xs text-red-600 font-bold mb-1 flex items-center gap-1"><Icons.AlertTriangle className="w-3 h-3"/> 推定ロス金額</div>
-                                <div className="text-xl font-bold text-red-700 tracking-tight">¥{Number(anData.lossAmount || 0).toLocaleString()}</div>
-                            </div>
+                    </>
+                );
+
+                if (!I) {
+                    return (
+                        <div className="animate-slide-up space-y-5 relative z-10">
+                            {header}
+                            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">分析データがありません。GASを最新版に更新（新バージョンでデプロイ）してから、右上の更新ボタンを押してください。</div>
+                        </div>
+                    );
+                }
+
+                const C = I.current, P = I.previous;
+                const products = I.products || [];
+                const reduceList = products.filter(p => p.action === 'reduce').sort((a, b) => b.lossAmount - a.lossAmount);
+                const increaseList = products.filter(p => p.action === 'increase');
+                // 推奨どおりに収穫した場合の、月あたりのロス削減見込み（販売価格ベース）
+                const monthlySaving = Math.round(reduceList.reduce((a, p) => a + Math.max(0, p.weeklyHarvest - p.suggestedWeekly) * p.price, 0) * 4.3);
+                const wd = I.weekday || [];
+                const wdTotal = wd.reduce((a, w) => a + w.sales, 0);
+                const wdTop = wd.length ? [...wd].sort((a, b) => b.sales - a.sales)[0] : null;
+                const followUp = I.customers.followUp || [];
+
+                // --- 気づき（自動コメント） ---
+                const notes = [];
+                if (C.lossAmount > 0 && C.sales > 0 && C.lossAmount >= C.sales * 0.3) {
+                    notes.push({ tone: 'bad', title: `廃棄額 ${yen(C.lossAmount)} は売上の ${Math.round(C.lossAmount / C.sales * 100)}% です`, body: `収穫した ${C.harvest}P のうち ${C.loss}P（${C.lossRate}%）が廃棄。売上を伸ばすより、収穫量を合わせるほうが早く利益が改善します。` });
+                }
+                if (reduceList.length > 0) {
+                    notes.push({ tone: 'action', title: `収穫を減らす候補：${reduceList.slice(0, 3).map(p => p.name).join('・')}${reduceList.length > 3 ? ` ほか${reduceList.length - 3}品` : ''}`, body: `下の「収穫の最適化」の推奨量に合わせると、廃棄を月あたり約 ${yen(monthlySaving)} 減らせる見込みです（販売価格ベース）。` });
+                }
+                if (increaseList.length > 0) {
+                    notes.push({ tone: 'good', title: `品切れ気味：${increaseList.map(p => p.name).join('・')}`, body: 'ほぼ完売しています。収穫を少し増やすと売上が伸びる可能性があります。' });
+                }
+                if (P.sales > 0) {
+                    const d = Math.round((C.sales - P.sales) / P.sales * 100);
+                    notes.push({ tone: d >= 0 ? 'good' : 'info', title: `売上は前期比 ${d >= 0 ? '+' : ''}${d}%（${yen(P.sales)} → ${yen(C.sales)}）`, body: `内訳：店頭 ${yen(C.store)} ／ LINE ${yen(C.line)} ／ 委託 ${yen(C.agency)}${I.period.end === I.period.today.slice(0, 7) ? '　※今月は途中経過です' : ''}` });
+                }
+                if (wdTop && wdTotal > 0) {
+                    notes.push({ tone: 'info', title: `いちばん売れる曜日は ${WEEK[wdTop.day]}曜（売上の ${Math.round(wdTop.sales / wdTotal * 100)}%）`, body: '収穫はこの曜日の前日〜当日に合わせると、鮮度も廃棄も改善しやすくなります。' });
+                }
+                if (followUp.length > 0) {
+                    notes.push({ tone: 'action', title: `${followUp.length}名のお客様が しばらく注文していません`, body: '下の「要フォロー」から、公式LINEで新商品や配送開始のお知らせを送るのがおすすめです。' });
+                }
+                const noteStyle = { bad: 'border-red-200 bg-red-50', action: 'border-blue-200 bg-blue-50', good: 'border-green-200 bg-green-50', info: 'border-gray-200 bg-gray-50' };
+                const noteIcon = { bad: <Icons.AlertTriangle className="w-4 h-4 text-red-600" />, action: <Icons.ClipboardList className="w-4 h-4 text-blue-600" />, good: <Icons.TrendingUp className="w-4 h-4 text-green-700" />, info: <Icons.Activity className="w-4 h-4 text-gray-500" /> };
+
+                // --- 12か月推移チャート（SVG） ---
+                // データが始まる前の空の月は表示しない
+                const allMonths = I.monthly || [];
+                const firstIdx = allMonths.findIndex(m => m.line + m.store + m.agency + m.lossAmount + m.harvest > 0);
+                const months = firstIdx > 0 ? allMonths.slice(firstIdx) : allMonths;
+                const W = 360, H = 190, padL = 38, padR = 8, padT = 14, padB = 26;
+                const maxY = Math.max(1000, ...months.map(m => Math.max(m.line + m.store + m.agency, m.lossAmount)));
+                const niceStep = (() => { const raw = maxY / 4; const pow = Math.pow(10, Math.floor(Math.log10(raw))); const n = raw / pow; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow; })();
+                const yMax = niceStep * Math.ceil(maxY / niceStep);
+                const yOf = v => padT + (H - padT - padB) * (1 - v / yMax);
+                const slot = (W - padL - padR) / Math.max(1, months.length);
+                const barW = Math.min(18, slot * 0.6);
+                const xOf = i => padL + slot * i + slot / 2;
+                const ticks = []; for (let v = 0; v <= yMax; v += niceStep) ticks.push(v);
+                const shortYen = v => v >= 10000 ? `${(v / 10000).toFixed(v % 10000 ? 1 : 0)}万` : v.toLocaleString();
+                const lossPath = months.map((m, i) => `${i ? 'L' : 'M'}${xOf(i).toFixed(1)},${yOf(m.lossAmount).toFixed(1)}`).join(' ');
+                const hoverM = trendHover != null ? months[trendHover] : null;
+
+                // --- 商品の並び：減らす → 増やす → 適正、各グループ内は廃棄額順 ---
+                const order = { reduce: 0, increase: 1, keep: 2 };
+                const productRows = [...products].sort((a, b) => (order[a.action] - order[b.action]) || (b.lossAmount - a.lossAmount));
+                const actionBadge = {
+                    reduce: <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">▼ 減らす</span>,
+                    increase: <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">▲ 増やす</span>,
+                    keep: <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5">● 適正</span>
+                };
+                const wdMax = Math.max(1, ...wd.map(w => w.sales));
+
+                return (
+                    <div className="animate-slide-up space-y-5 relative z-10">
+                        {header}
+
+                        {/* ① KPI */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <Kpi label="売上合計（税込）" value={yen(C.sales)} sub={`店頭 ${yen(C.store)}・LINE ${yen(C.line)}・委託 ${yen(C.agency)}`}><Delta cur={C.sales} prev={P.sales} /></Kpi>
+                            <Kpi label="販売数" value={<>{C.qty.toLocaleString()} <span className="text-sm font-normal text-gray-500">P</span></>} sub={`収穫 ${C.harvest}P に対して`}><Delta cur={C.qty} prev={P.qty} /></Kpi>
+                            <Kpi label="販売率（売れた割合）" value={C.sellThrough == null ? '—' : `${C.sellThrough}%`} sub="販売数 ÷ 収穫数"><Delta cur={C.sellThrough} prev={P.sellThrough} pt /></Kpi>
+                            <Kpi label="廃棄額（販売価格換算）" tone={C.sales > 0 && C.lossAmount >= C.sales * 0.3 ? 'bad' : undefined} value={yen(C.lossAmount)} sub={`${C.loss}P・収穫の ${C.lossRate ?? '—'}%`}><Delta cur={C.lossAmount} prev={P.lossAmount} inverse /></Kpi>
+                            <Kpi label="LINE注文" value={<>{C.lineOrders} <span className="text-sm font-normal text-gray-500">件</span></>} sub={`平均 ${yen(C.avgLineOrder)} ／ 配送 ${C.delivery}件・店頭 ${C.pickup}件`}><Delta cur={C.lineOrders} prev={P.lineOrders} /></Kpi>
+                            <Kpi label="店頭販売" value={<>{C.storeTx} <span className="text-sm font-normal text-gray-500">回</span></>} sub={`1回あたり ${yen(C.storeTx ? C.store / C.storeTx : 0)}`}><Delta cur={C.storeTx} prev={P.storeTx} /></Kpi>
                         </div>
 
-                        {/* 安全なCSSベースのグラフセクション（クラッシュしない） */}
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-3">
-                                <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">売上構成と推移</h3>
-                                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                                    <button onClick={() => setChartType('line')} className={`p-1.5 rounded-md transition-colors ${chartType==='line'?'bg-white shadow-sm text-blue-600':'text-gray-400 hover:text-gray-600'}`} title="日別推移"><Icons.Activity className="w-4 h-4"/></button>
-                                    <button onClick={() => setChartType('pie_ratio')} className={`p-1.5 rounded-md transition-colors ${chartType==='pie_ratio'?'bg-white shadow-sm text-blue-600':'text-gray-400 hover:text-gray-600'}`} title="直販・委託比率"><Icons.PieChart className="w-4 h-4"/></button>
-                                    <button onClick={() => setChartType('pie_product')} className={`p-1.5 rounded-md transition-colors ${chartType==='pie_product'?'bg-white shadow-sm text-blue-600':'text-gray-400 hover:text-gray-600'}`} title="商品売上"><Icons.BarChart className="w-4 h-4"/></button>
+                        {/* ② 気づき */}
+                        {notes.length > 0 && (
+                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                                <h3 className="font-bold text-gray-800 text-sm mb-3 flex items-center gap-2"><Icons.Award className="w-4 h-4 text-blue-600" /> 今期の気づき・打ち手</h3>
+                                <div className="space-y-2">
+                                    {notes.map((n, i) => (
+                                        <div key={i} className={`rounded-lg border p-3 ${noteStyle[n.tone]}`}>
+                                            <div className="flex items-start gap-2"><span className="mt-0.5 shrink-0">{noteIcon[n.tone]}</span><div><div className="text-sm font-bold text-gray-900 leading-snug">{n.title}</div><div className="text-[11px] text-gray-600 mt-1 leading-relaxed">{n.body}</div></div></div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
-                            
-                            <div className="w-full relative min-h-[220px]">
-                                {chartType === 'line' ? (
-                                    dailyData.length > 0 ? (
-                                        <div>
-                                            <div className="flex items-center gap-4 justify-end mb-2 text-[10px] font-bold">
-                                                <div className="flex items-center gap-1"><div className="w-2 h-2 bg-nanairo-dark rounded-full"></div>直販・店頭</div>
-                                                <div className="flex items-center gap-1"><div className="w-2 h-2 bg-agency rounded-full"></div>委託販売</div>
+                        )}
+
+                        {/* ③ 12か月推移 */}
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="font-bold text-gray-800 text-sm">売上と廃棄の推移（月別）</h3>
+                                <button type="button" onClick={() => setShowTrendTable(!showTrendTable)} className="text-[11px] font-bold text-blue-600">{showTrendTable ? 'グラフで見る' : '表で見る'}</button>
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-700 mb-2">
+                                {CH.map(c => <span key={c.key} className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: c.color }}></span>{c.label}</span>)}
+                                <span className="flex items-center gap-1"><svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="#6b7280" strokeWidth="2" strokeDasharray="4 2" /></svg>廃棄額</span>
+                            </div>
+                            {showTrendTable ? (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-[11px] text-right">
+                                        <thead className="text-gray-500"><tr><th className="text-left py-1">月</th><th>店頭</th><th>LINE</th><th>委託</th><th>合計</th><th>廃棄額</th></tr></thead>
+                                        <tbody>{months.map(m => (<tr key={m.month} className="border-t border-gray-100"><td className="text-left py-1 font-bold">{m.month.slice(2).replace('-', '/')}</td><td>{m.store.toLocaleString()}</td><td>{m.line.toLocaleString()}</td><td>{m.agency.toLocaleString()}</td><td className="font-bold">{(m.store + m.line + m.agency).toLocaleString()}</td><td className="text-gray-500">{m.lossAmount.toLocaleString()}</td></tr>))}</tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="relative">
+                                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="直近12か月の月別売上（チャネル別）と廃棄額の推移">
+                                        {ticks.map(v => (<g key={v}><line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#e5e7eb" strokeWidth="1" /><text x={padL - 4} y={yOf(v) + 3} textAnchor="end" fontSize="9" fill="#6b7280">{shortYen(v)}</text></g>))}
+                                        {months.map((m, i) => {
+                                            let acc = 0;
+                                            const segs = CH.map(c => { const v = m[c.key]; const y0 = yOf(acc), y1 = yOf(acc + v); acc += v; return { c, v, y: y1, h: Math.max(0, y0 - y1) }; }).filter(sg => sg.v > 0);
+                                            return (
+                                                <g key={m.month} onMouseEnter={() => setTrendHover(i)} onMouseLeave={() => setTrendHover(null)} onClick={() => setTrendHover(trendHover === i ? null : i)} style={{ cursor: 'pointer' }}>
+                                                    <rect x={xOf(i) - slot / 2} y={padT} width={slot} height={H - padT - padB} fill={trendHover === i ? '#f3f4f6' : 'transparent'} />
+                                                    {segs.map((sg, k) => {
+                                                        const isTop = k === segs.length - 1;
+                                                        // 2pxの隙間で積み上げを区切り、いちばん上だけ角を丸める
+                                                        const h = Math.max(0, sg.h - (k > 0 ? 2 : 0));
+                                                        return isTop
+                                                            ? <path key={sg.c.key} d={`M${xOf(i) - barW / 2},${sg.y + h} V${sg.y + Math.min(3, h)} Q${xOf(i) - barW / 2},${sg.y} ${xOf(i) - barW / 2 + 3},${sg.y} H${xOf(i) + barW / 2 - 3} Q${xOf(i) + barW / 2},${sg.y} ${xOf(i) + barW / 2},${sg.y + Math.min(3, h)} V${sg.y + h} Z`} fill={sg.c.color} />
+                                                            : <rect key={sg.c.key} x={xOf(i) - barW / 2} y={sg.y} width={barW} height={h} fill={sg.c.color} />;
+                                                    })}
+                                                    <text x={xOf(i)} y={H - padB + 12} textAnchor="middle" fontSize="9" fill={m.month.endsWith('-01') ? '#374151' : '#6b7280'} fontWeight={m.month.endsWith('-01') ? 'bold' : 'normal'}>{m.month.endsWith('-01') ? m.month.slice(2, 4) + '/1' : Number(m.month.slice(5)) + '月'}</text>
+                                                </g>
+                                            );
+                                        })}
+                                        <path d={lossPath} fill="none" stroke="#6b7280" strokeWidth="2" strokeDasharray="4 3" pointerEvents="none" />
+                                        {months.map((m, i) => m.lossAmount > 0 && <circle key={i} cx={xOf(i)} cy={yOf(m.lossAmount)} r="3" fill="#fff" stroke="#6b7280" strokeWidth="2" pointerEvents="none" />)}
+                                        <line x1={padL} x2={W - padR} y1={yOf(0)} y2={yOf(0)} stroke="#9ca3af" strokeWidth="1" />
+                                    </svg>
+                                    {hoverM && (
+                                        <div className={`absolute top-0 ${trendHover > months.length / 2 - 1 ? 'left-10' : 'right-0'} bg-gray-900/95 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg pointer-events-none`}>
+                                            <div className="font-bold mb-1">{hoverM.month.replace('-', '年')}月</div>
+                                            {CH.map(c => <div key={c.key} className="flex justify-between gap-4"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: c.color }}></span>{c.label}</span><span>{yen(hoverM[c.key])}</span></div>)}
+                                            <div className="flex justify-between gap-4 border-t border-white/20 mt-1 pt-1 font-bold"><span>合計</span><span>{yen(hoverM.line + hoverM.store + hoverM.agency)}</span></div>
+                                            <div className="flex justify-between gap-4 text-gray-300"><span>廃棄額</span><span>{yen(hoverM.lossAmount)}</span></div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            <p className="text-[10px] text-gray-500 mt-1">棒グラフをタップすると内訳が出ます。廃棄額が売上の棒を上回る月は、収穫しすぎのサインです。</p>
+                        </div>
+
+                        {/* ④ 収穫の最適化 */}
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                            <h3 className="font-bold text-gray-800 text-sm mb-1">商品別 収穫の最適化</h3>
+                            <p className="text-[10px] text-gray-500 mb-3">推奨収穫量 ＝ 週平均の販売数 × 1.15（品切れを防ぐ15%の余裕）。バーは収穫量の内訳（<span className="text-green-700 font-bold">販売</span>／<span className="text-gray-600 font-bold">廃棄</span>／残り）です。</p>
+                            <div className="space-y-3">
+                                {productRows.map(p => {
+                                    const soldPct = p.harvest ? Math.min(100, p.sold / p.harvest * 100) : 0;
+                                    const lossPct = p.harvest ? Math.min(100 - soldPct, p.loss / p.harvest * 100) : 0;
+                                    return (
+                                        <div key={p.id} className="border-b border-gray-100 pb-3 last:border-0 last:pb-0">
+                                            <div className="flex justify-between items-center mb-1.5 gap-2">
+                                                <div className="flex items-center gap-1.5 min-w-0"><span className="text-sm font-bold text-gray-800 truncate">{p.name}</span>{actionBadge[p.action]}</div>
+                                                <div className="text-[11px] text-gray-500 shrink-0">売上 <span className="font-bold text-gray-800">{yen(p.sales)}</span></div>
                                             </div>
-                                            <div className="h-40 flex items-end gap-1.5 overflow-x-auto w-full pb-1">
-                                                {dailyData.map(d => {
-                                                    const h1 = (d.direct / maxDailySales) * 100;
-                                                    const h2 = (d.agency / maxDailySales) * 100;
-                                                    return (
-                                                        <div key={d.date} className="flex flex-col items-center flex-1 min-w-[20px] max-w-[40px] group relative">
-                                                            <div className="w-full flex-1 flex flex-col justify-end bg-gray-50 rounded-t overflow-hidden relative">
-                                                                <div className="w-full bg-agency transition-all duration-500 ease-out" style={{height: `${h2}%`}}></div>
-                                                                <div className="w-full bg-nanairo-dark transition-all duration-500 ease-out" style={{height: `${h1}%`}}></div>
-                                                                <div className="absolute hidden group-hover:block bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-20">¥{(d.direct+d.agency).toLocaleString()}</div>
-                                                            </div>
-                                                            <span className="text-[9px] text-gray-400 mt-1 whitespace-nowrap">{d.date.split('/')[1] || d.date.split('-')[2]}日</span>
-                                                        </div>
-                                                    )
-                                                })}
+                                            <div className="w-full h-2.5 rounded-full bg-gray-100 overflow-hidden flex gap-[2px]" title={`販売 ${p.sold}P / 廃棄 ${p.loss}P / 収穫 ${p.harvest}P`}>
+                                                {soldPct > 0 && <div className="h-full bg-green-600 rounded-l-full" style={{ width: `${soldPct}%` }}></div>}
+                                                {lossPct > 0 && <div className="h-full bg-gray-400" style={{ width: `${lossPct}%` }}></div>}
+                                            </div>
+                                            <div className="flex justify-between items-center mt-1.5 text-[11px] text-gray-600">
+                                                <span>販売率 <span className="font-bold text-gray-900">{p.sellThrough ?? '—'}%</span>・廃棄 {p.loss}P（{yen(p.lossAmount)}）</span>
+                                                <span className="shrink-0">週 <span className="font-bold">{p.weeklyHarvest}P</span> → 推奨 <span className={`font-bold ${p.action === 'reduce' ? 'text-red-700' : p.action === 'increase' ? 'text-green-700' : 'text-gray-900'}`}>{p.suggestedWeekly}P</span></span>
                                             </div>
                                         </div>
-                                    ) : <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">データがありません</div>
-                                ) : chartType === 'pie_ratio' ? (
-                                    totalCombinedSales > 0 ? (
-                                        <div className="flex flex-col items-center justify-center h-full pt-4">
-                                            <div className="w-full max-w-[240px] mb-6">
-                                                <div className="flex justify-between text-xs font-bold mb-2">
-                                                    <span className="text-nanairo-dark">直販・店頭 {Math.round(directRatio)}%</span>
-                                                    <span className="text-agency">委託販売 {Math.round(agencyRatio)}%</span>
-                                                </div>
-                                                <div className="h-4 w-full rounded-full overflow-hidden flex bg-gray-100 shadow-inner">
-                                                    <div className="bg-nanairo-dark h-full transition-all duration-1000 ease-out" style={{width: `${directRatio}%`}}></div>
-                                                    <div className="bg-agency h-full transition-all duration-1000 ease-out" style={{width: `${agencyRatio}%`}}></div>
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-6 text-sm font-bold">
-                                                <div className="text-center"><div className="text-[10px] text-gray-500 mb-0.5">直販・店頭 売上</div><div className="text-gray-800">¥{directTotal.toLocaleString()}</div></div>
-                                                <div className="text-center"><div className="text-[10px] text-gray-500 mb-0.5">委託販売 純売上</div><div className="text-gray-800">¥{agencyTotal.toLocaleString()}</div></div>
-                                            </div>
-                                        </div>
-                                    ) : <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">データがありません</div>
-                                ) : chartType === 'pie_product' ? (
-                                    topProducts.length > 0 ? (
-                                        <div className="space-y-3 pt-2">
-                                            {topProducts.slice(0, 5).map((p, idx) => {
-                                                const maxQty = topProducts[0]?.qty || 1;
-                                                const percent = Math.max(5, Math.round((p.qty / maxQty) * 100));
-                                                const colors = ['bg-blue-500', 'bg-blue-400', 'bg-blue-300', 'bg-gray-400', 'bg-gray-300'];
-                                                return (
-                                                    <div key={p.name}>
-                                                        <div className="flex justify-between items-center mb-1">
-                                                            <div className="text-xs font-bold text-gray-800 flex items-center gap-1.5"><span className="text-gray-400">{idx + 1}.</span> {p.name}</div>
-                                                            <div className="text-xs font-bold text-gray-600">{p.qty} P</div>
-                                                        </div>
-                                                        <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                                                            <div className={`${colors[idx] || colors[4]} h-full transition-all duration-1000 ease-out`} style={{ width: `${percent}%` }}></div>
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    ) : <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">データがありません</div>
-                                ) : null}
+                                    );
+                                })}
+                                {productRows.length === 0 && <p className="text-sm text-gray-500 text-center py-4">データがありません</p>}
                             </div>
                         </div>
 
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mt-5">
-                            <h3 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2"><Icons.AlertTriangle className="w-4 h-4 text-orange-500"/> 商品別 ロス率</h3>
-                            <p className="text-[10px] text-gray-500 mb-3">指定期間内の「収穫量」に対する「破棄量」の割合です。</p>
-                            <div className="space-y-3">
-                                {stockStats && stockStats.length > 0 ? (
-                                    stockStats.map((stat, idx) => {
-                                        const barColor = stat.lossRate > 30 ? 'bg-red-500' : stat.lossRate > 10 ? 'bg-orange-400' : 'bg-green-500';
-                                        return (
-                                            <div key={idx}>
-                                                <div className="flex justify-between items-end mb-1">
-                                                    <div className="text-sm font-bold text-gray-800">{stat.name}</div>
-                                                    <div className="text-xs text-gray-600">
-                                                        <span className="font-bold text-red-600">{stat.lossRate}%</span> <span className="text-[10px]">(ロス{stat.lossQty} / 収穫{stat.harvestQty})</span>
-                                                    </div>
-                                                </div>
-                                                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                                                    <div className={`${barColor} h-full transition-all duration-1000 ease-out`} style={{ width: `${stat.lossRate}%` }}></div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })
-                                ) : (
-                                    <p className="text-sm text-gray-500 text-center py-4">データがありません</p>
-                                )}
+                        {/* ⑤ 曜日別 */}
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                            <h3 className="font-bold text-gray-800 text-sm mb-1">曜日別の売上（店頭販売＋LINE注文）</h3>
+                            <p className="text-[10px] text-gray-500 mb-3">店頭は記録した日、LINEは受取日で集計しています。</p>
+                            <div className="flex items-end gap-2 h-28">
+                                {[1, 2, 3, 4, 5, 6, 0].map(d => {
+                                    const w = wd[d] || { sales: 0, qty: 0 };
+                                    const isTop = wdTop && d === wdTop.day && w.sales > 0;
+                                    return (
+                                        <div key={d} className="flex-1 flex flex-col items-center justify-end h-full" title={`${WEEK[d]}曜 ${yen(w.sales)}（${w.qty}P）`}>
+                                            <span className={`text-[10px] mb-0.5 ${isTop ? 'font-bold text-gray-900' : 'text-gray-500'}`}>{w.sales ? shortYen(w.sales) : ''}</span>
+                                            <div className={`w-full max-w-[28px] rounded-t ${isTop ? 'bg-blue-600' : 'bg-blue-300'}`} style={{ height: `${Math.max(w.sales ? 4 : 0, w.sales / wdMax * 80)}%` }}></div>
+                                            <span className={`text-[11px] mt-1 ${d === 1 ? 'text-gray-400' : 'text-gray-700'} font-bold`}>{WEEK[d]}</span>
+                                        </div>
+                                    );
+                                })}
                             </div>
+                        </div>
+
+                        {/* ⑥ 顧客 */}
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                            <h3 className="font-bold text-gray-800 text-sm mb-3">LINE顧客の状況</h3>
+                            <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                                <div className="bg-gray-50 rounded-lg p-2"><div className="text-[10px] text-gray-500 font-bold">累計顧客</div><div className="text-lg font-bold text-gray-900">{I.customers.total}<span className="text-xs font-normal">人</span></div></div>
+                                <div className="bg-gray-50 rounded-lg p-2"><div className="text-[10px] text-gray-500 font-bold">今期 注文者</div><div className="text-lg font-bold text-gray-900">{I.customers.active}<span className="text-xs font-normal">人</span></div><div className="text-[10px] text-gray-500">うち新規 {I.customers.newCount}</div></div>
+                                <div className="bg-gray-50 rounded-lg p-2"><div className="text-[10px] text-gray-500 font-bold">リピート率</div><div className="text-lg font-bold text-gray-900">{I.customers.repeatRate}<span className="text-xs font-normal">%</span></div><div className="text-[10px] text-gray-500">2回以上 {I.customers.repeaters}人</div></div>
+                            </div>
+                            <div className="text-xs font-bold text-gray-700 mb-2">要フォロー（しばらく注文がないお客様）</div>
+                            {followUp.length > 0 ? (
+                                <div className="space-y-1.5">
+                                    {followUp.map(c => (
+                                        <div key={c.id} className="flex justify-between items-center bg-orange-50/50 border border-orange-100 rounded-lg px-3 py-2">
+                                            <div><div className="text-sm font-bold text-gray-800">{c.name} 様</div><div className="text-[10px] text-gray-500">注文 {c.orders}回・累計 {yen(c.spend)}{c.avgGapDays ? `・いつもは${c.avgGapDays}日ごと` : ''}</div></div>
+                                            <div className="text-right"><div className="text-sm font-bold text-orange-700">{c.daysSince}日</div><div className="text-[10px] text-gray-500">前が最後</div></div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">該当なし。みなさん定期的に注文されています。</p>}
                         </div>
 
                         <div className="bg-white p-4 rounded-xl shadow-sm border border-yellow-200">
