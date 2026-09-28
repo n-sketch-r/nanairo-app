@@ -111,6 +111,9 @@
             "青じそ": "爽やかな香り"
         };
 
+        // この数以下で「残りわずか」と表示する
+        const LOW_STOCK = 2;
+
         // ★配送ルール（GAS側の DELIVERY と同じ値にしてください）
         const DELIVERY = {
             days: [1, 2],                // 配送できる曜日（0=日,1=月,2=火 ...）
@@ -607,7 +610,7 @@
                                         <div className="grid grid-cols-2 gap-3 pb-20">
                                             {productsData.map(product => {
                                                 const qty = cart[product.id] || 0;
-                                                const isLowStock = product.stock > 0 && product.stock <= 5;
+                                                const isLowStock = product.stock > 0 && product.stock <= LOW_STOCK; // 残りわずか
                                                 const isSoldOut = product.stock <= 0;
 
                                                 return (
@@ -987,7 +990,7 @@
                                         {p.desc && <p className="text-sm text-stone-600 mt-1">{p.desc}</p>}
                                         <div className="flex items-end justify-between mt-3">
                                             <span className="text-2xl font-black text-stone-900">¥{p.price}<span className="text-sm font-normal text-stone-500 ml-1">（税込）</span></span>
-                                            <span className="text-sm text-stone-500">内容量 {p.weight}{p.stock > 0 && p.stock <= 5 ? `・残りわずか ${p.stock}` : ''}</span>
+                                            <span className="text-sm text-stone-500">内容量 {p.weight}{p.stock > 0 && p.stock <= LOW_STOCK ? `・残りわずか ${p.stock}` : ''}</span>
                                         </div>
                                         <div className="mt-4 h-12">
                                             {soldOut ? (

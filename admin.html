@@ -349,28 +349,7 @@
                 finally { setIsBulkSubmitting(false); setShowBulkLossModal(false); }
             };
 
-            const handleCancelStockLog = async () => {
-                if (!cancelTargetLog || isCancelling) return;
-                setIsCancelling(true);
-                try {
-                    await postAdmin({ action: "cancelStockLog", rowIndex: cancelTargetLog.rowIndex });
-                    showMessage(`記録を取り消し、在庫を元に戻しました。`); fetchData(viewStartMonth, viewEndMonth);
-                } catch(error) { showMessage("取消エラー: " + error.message, 6000); } 
-                finally { setIsCancelling(false); setCancelTargetLog(null); }
-            };
 
-            const toggleOrderStatus = async (orderId, currentStatus) => {
-                if(currentStatus === 'キャンセル') return; 
-                const nextStatus = currentStatus === '未対応' ? '準備完了' : currentStatus === '準備完了' ? '受渡済' : '未対応';
-                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: nextStatus } : o));
-                try {
-                    await postAdmin({ action: "statusUpdate", orderId: orderId, newStatus: nextStatus });
-                    fetchData(viewStartMonth, viewEndMonth);
-                } catch(error) {
-                    showMessage("ステータス更新に失敗しました: " + error.message, 6000);
-                    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: currentStatus } : o));
-                }
-            };
 
             const toggleCheck = async (orderId, role, isChecked) => {
                 const field = role === 'senmu' ? 'senmuChecked' : role === 'paid' ? 'paidChecked' : 'cafeChecked';
@@ -464,39 +443,8 @@
                 finally { setIsSubmittingDelivery(false); }
             };
 
-            const handleAgencyInventory = async () => {
-                if (!inventoryModal) return;
-                const d = inventoryModal;
-                if (invSalesQty + invLossQty !== d.deliveryQty) return showMessage("「売れた数」と「ロス」の合計が納品数と一致しません！", 5000);
 
-                setIsSubmittingDelivery(true);
-                try {
-                    await postAdmin({ action: "agencyInventory", deliveryId: d.id, salesQty: invSalesQty, lossQty: invLossQty });
-                    showMessage(`棚卸し（精算）を完了しました！`);
-                    setInventoryModal(null); fetchData(viewStartMonth, viewEndMonth);
-                } catch (error) { showMessage("精算を記録できませんでした: " + error.message, 6000); } 
-                finally { setIsSubmittingDelivery(false); }
-            };
 
-            const handleCancelAgencyDelivery = async () => {
-                if(!cancelDeliveryTarget || isCancelling) return;
-                setIsCancelling(true);
-                try {
-                    await postAdmin({ action: "cancelAgencyDelivery", rowIndex: cancelDeliveryTarget.rowIndex });
-                    showMessage("納品を取り消し、在庫を元に戻しました。"); fetchData(viewStartMonth, viewEndMonth);
-                } catch(e) { showMessage("取消エラー: " + e.message, 6000); }
-                finally { setIsCancelling(false); setCancelDeliveryTarget(null); }
-            };
-
-            const handleCancelAgencyInventory = async () => {
-                if(!cancelInventoryTarget || isCancelling) return;
-                setIsCancelling(true);
-                try {
-                    await postAdmin({ action: "cancelAgencyInventory", rowIndex: cancelInventoryTarget.rowIndex });
-                    showMessage("精算を取り消し、未精算の状態に戻しました。"); fetchData(viewStartMonth, viewEndMonth);
-                } catch(e) { showMessage("取消エラー: " + e.message, 6000); }
-                finally { setIsCancelling(false); setCancelInventoryTarget(null); }
-            };
 
             if (!adminKey) {
                 return (
@@ -1091,7 +1039,7 @@
 
                                 <div className="pt-2">
                                     <div className="flex items-center justify-between mb-2">
-                                        <h3 className="font-bold text-gray-900">済んだ注文</h3>
+                                        <h3 className="font-bold text-gray-900">済んだ注文{viewStartMonth !== viewEndMonth && <span className="ml-1 text-xs font-normal text-gray-500">（{Number(viewStartMonth.slice(5))}〜{Number(viewEndMonth.slice(5))}月）</span>}</h3>
                                         <input type="month" value={viewStartMonth} onChange={e => { if (e.target.value) { setViewStartMonth(e.target.value); setViewEndMonth(e.target.value); } }} className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold text-gray-700 min-w-0 appearance-none" />
                                     </div>
                                     <div className="flex gap-1.5 mb-2 text-xs font-bold overflow-x-auto">
@@ -1290,7 +1238,7 @@
                             </div>
                             {memoBox({ id: 'c:' + sel.key, value: sel.memo, onSave: m => saveCustomerMemo(sel.key, m), label: 'メモ（スタッフ用）' })}
                             <div className="flex gap-2">
-                                <button type="button" onClick={() => openCustomerReport(sel, monthOrders)} className="flex-1 bg-white border border-gray-200 rounded-xl py-2.5 text-xs font-bold text-gray-700">🧾 {Number(viewStartMonth.slice(5))}月の請求書</button>
+                                <button type="button" onClick={() => openCustomerReport(sel, monthOrders)} className="flex-1 bg-white border border-gray-200 rounded-xl py-2.5 text-xs font-bold text-gray-700">🧾 {viewStartMonth === viewEndMonth ? `${Number(viewStartMonth.slice(5))}月` : `${Number(viewStartMonth.slice(5))}〜${Number(viewEndMonth.slice(5))}月`}の請求書</button>
                                 {unpaidList.length > 0 && <button type="button" onClick={() => openCustomerReport(sel, unpaidList)} className="flex-1 bg-white border border-red-200 rounded-xl py-2.5 text-xs font-bold text-red-600">🧾 未集金分の請求書</button>}
                             </div>
                             <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">注文の履歴</b><span className="text-xs text-gray-500">{history.length}件</span></div>
