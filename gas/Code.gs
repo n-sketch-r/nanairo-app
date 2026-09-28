@@ -588,6 +588,11 @@ function calculateStockStats(startMonthStr, endMonthStr) {
   return { totalLossAmount: totalLossAmount, stats: statsArray, directSalesAmount: directSalesAmount, directSalesCount: directSalesCount, directSalesItems: directSalesItems };
 }
 
+// 電話番号をそろえる（iPhoneの自動入力の「+81 80-…」を「080-…」にする）
+function normalizePhone(value) {
+  return String(value || "").trim().replace(/^\+81[\s-]?/, "0").replace(/[^\d-]/g, "");
+}
+
 // 1以上の整数かチェックして返す
 function positiveInt(value, label) {
   const n = Number(value);
@@ -720,7 +725,7 @@ function processNewOrder(data) {
     const city = String(data.city || "");
     if (DELIVERY.areas.indexOf(city) === -1) throw new Error("配送エリア（庄内一円）外のため承れません。");
     address = city + String(data.addressDetail || "").trim();
-    phone = String(data.phone || "").replace(/[^\d-]/g, "");
+    phone = normalizePhone(data.phone);
     if (!String(data.addressDetail || "").trim()) throw new Error("配送先のご住所を入力してください。");
     if (phone.replace(/-/g, "").length < 10) throw new Error("電話番号を正しく入力してください。");
     pickupTime = DELIVERY.time;
@@ -844,7 +849,7 @@ function findCustomer(userId) {
 function saveCustomer(data, verified) {
   if (!verified || !data.userId) throw new Error("LINEアプリから開き直してください（本人確認ができませんでした）。");
   const fullName = String(data.fullName || "").trim().slice(0, 30);
-  const phone = String(data.phone || "").replace(/[^\d-]/g, "");
+  const phone = normalizePhone(data.phone);
   const storeName = String(data.storeName || "").trim().slice(0, 50);
   if (!fullName) throw new Error("お名前を入力してください。");
   if (phone.replace(/-/g, "").length < 10) throw new Error("電話番号を正しく入力してください。");

@@ -138,6 +138,9 @@
             const [, m, d] = dateStr.split('-').map(Number);
             return `${m}/${d}(${WEEK[weekdayOf(dateStr)]})`;
         };
+        // 電話番号をそろえる（iPhoneの自動入力の「+81 80-…」を「080-…」にする）
+        const normalizePhone = (v) => String(v || '').trim().replace(/^\+81[\s-]?/, '0').replace(/[^\d-]/g, '');
+
         // 前日の yyyy-MM-dd（キャンセル期限の表示用）
         const prevDayStr = (dateStr) => {
             const [y, m, d] = String(dateStr).split('-').map(Number);
@@ -338,7 +341,7 @@
                 setIsSavingCustomer(true); setCfError("");
                 try {
                     const res = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({ action: "saveProfile", idToken: getIdToken(), fullName: cfName.trim(), phone: cfPhone.trim(), storeName: cfStore.trim() }) });
+                        body: JSON.stringify({ action: "saveProfile", idToken: getIdToken(), fullName: cfName.trim(), phone: normalizePhone(cfPhone), storeName: cfStore.trim() }) });
                     const data = await res.json();
                     if (!data || data.status !== "success") throw new Error((data && data.message) || "登録できませんでした");
                     setPhone(data.profile.phone); setStoreName(data.profile.storeName);
@@ -443,7 +446,7 @@
                     pickupTime: isDelivery ? DELIVERY.time : pickupTime,
                     city: isDelivery ? city : "",
                     addressDetail: isDelivery ? addressDetail.trim() : "",
-                    phone: isDelivery ? phone.trim() : "",
+                    phone: isDelivery ? normalizePhone(phone) : "",
                     storeName: storeName.trim(),
                     memo: memo || "なし",
                     totalPrice: cartSummary.grandTotal // 参考値（金額はサーバー側で再計算します）
