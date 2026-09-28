@@ -165,6 +165,11 @@
             const [bulkQty, setBulkQty] = useState({});
             const [bulkRunning, setBulkRunning] = useState(false);
             const [bulkProgress, setBulkProgress] = useState(0);
+            const [anSort, setAnSort] = useState('sales');             // 分析：商品別の並べ替え
+            const [anDir, setAnDir] = useState('desc');
+            const [anFilter, setAnFilter] = useState('all');
+            const [anShowAll, setAnShowAll] = useState(false);
+            const [anChartMode, setAnChartMode] = useState('amount');
             
             // モーダル・キャンセル関連
             const [showBulkLossModal, setShowBulkLossModal] = useState(false);
@@ -1392,304 +1397,281 @@
             };
 
             const renderAnalyticsTab = () => {
-                const formatMonth = (m) => m ? m.replace('-', '年') + '月' : '';
-                const isSingleMonth = viewStartMonth === viewEndMonth;
-                const periodText = isSingleMonth ? formatMonth(viewStartMonth) : `${formatMonth(viewStartMonth)} 〜 ${formatMonth(viewEndMonth)}`;
-
-                const anData = analytics || {};
-                const topCustomers = anData.topCustomers || [];
                 const I = insights;
                 const yen = (n) => `¥${Math.round(Number(n || 0)).toLocaleString()}`;
                 const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
-                // 系列の色（識別用・固定順）：LINE注文 / 店頭販売 / 委託
-                const CH = [
-                    { key: 'line', label: 'LINE注文', color: '#16a34a' },
-                    { key: 'store', label: '店頭販売', color: '#2563eb' },
-                    { key: 'agency', label: '委託', color: '#f97316' }
+                const fmtM = (m) => m ? `${m.slice(0, 4)}年${Number(m.slice(5))}月` : '';
+                const addMonths = (m, n) => { const [y, mo] = m.split('-').map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+                const setPeriod = (a, b) => { setViewStartMonth(a); setViewEndMonth(b); };
+                const presets = [
+                    ['今月', todayMonth, todayMonth], ['先月', addMonths(todayMonth, -1), addMonths(todayMonth, -1)],
+                    ['3か月', addMonths(todayMonth, -2), todayMonth], ['今年', todayMonth.slice(0, 4) + '-01', todayMonth],
                 ];
-
-                const Delta = ({ cur, prev, unit = '%', inverse = false, pt = false }) => {
-                    if (prev == null || cur == null || (!pt && !prev)) return <span className="text-[10px] text-gray-400">前期比 —</span>;
-                    const d = pt ? (cur - prev) : Math.round((cur - prev) / prev * 100);
-                    if (d === 0) return <span className="text-[10px] text-gray-500">前期比 ±0{pt ? 'pt' : unit}</span>;
-                    const good = inverse ? d < 0 : d > 0;
-                    return <span className={`text-[10px] font-bold ${good ? 'text-green-700' : 'text-red-600'}`}>{d > 0 ? '▲' : '▼'} {Math.abs(d)}{pt ? 'pt' : unit} <span className="font-normal text-gray-500">前期比</span></span>;
-                };
-
-                const Kpi = ({ label, value, sub, children, tone }) => (
-                    <div className={`p-3.5 rounded-xl border shadow-sm ${tone === 'bad' ? 'bg-red-50/60 border-red-200' : 'bg-white border-gray-200'}`}>
-                        <div className={`text-[11px] font-bold mb-1 ${tone === 'bad' ? 'text-red-700' : 'text-gray-500'}`}>{label}</div>
-                        <div className={`text-xl font-bold tracking-tight ${tone === 'bad' ? 'text-red-800' : 'text-gray-900'}`}>{value}</div>
-                        {sub && <div className="text-[10px] text-gray-500 mt-0.5">{sub}</div>}
-                        <div className="mt-1">{children}</div>
+                const periodBar = (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="text-lg font-bold text-gray-900">{viewStartMonth === viewEndMonth ? fmtM(viewStartMonth) : `${fmtM(viewStartMonth)}〜${fmtM(viewEndMonth)}`}</div>
+                            {I && I.period && <div className="text-xs text-gray-500">{I.period.days}日間　比較：{fmtM(I.period.prevStart)}{I.period.prevStart !== I.period.prevEnd ? `〜${fmtM(I.period.prevEnd)}` : ''}</div>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 text-xs font-bold">
+                            {presets.map(([l, a, b]) => <button key={l} type="button" onClick={() => setPeriod(a, b)} className={`px-3 py-1.5 rounded-full border ${viewStartMonth === a && viewEndMonth === b ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>{l}</button>)}
+                            <input type="month" value={viewStartMonth} onChange={e => e.target.value && setPeriod(e.target.value, e.target.value > viewEndMonth ? e.target.value : viewEndMonth)} className="bg-white border border-gray-200 rounded-lg px-2 py-1 min-w-0 appearance-none" />
+                            <span className="text-gray-400">〜</span>
+                            <input type="month" value={viewEndMonth} onChange={e => e.target.value && setPeriod(e.target.value < viewStartMonth ? e.target.value : viewStartMonth, e.target.value)} className="bg-white border border-gray-200 rounded-lg px-2 py-1 min-w-0 appearance-none" />
+                            <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-1.5 bg-white rounded-full border border-gray-200 text-gray-500"><Icons.RefreshCw className={`w-4 h-4 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
+                        </div>
                     </div>
                 );
-
-                const header = (
-                    <>
-                        <div className="flex justify-between items-center mb-4">
-                            <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm w-fit">
-                                <Icons.Calendar className="w-4 h-4 text-gray-500" />
-                                <input type="month" value={viewStartMonth} onChange={(e) => setViewStartMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
-                                <span className="text-gray-400 font-bold">〜</span>
-                                <input type="month" value={viewEndMonth} onChange={(e) => setViewEndMonth(e.target.value)} className="bg-transparent font-bold text-gray-700 outline-none text-sm cursor-pointer w-24" />
-                            </div>
-                            <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full shadow-sm text-gray-500 active:bg-gray-100">
-                                <Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} />
-                            </button>
-                        </div>
-                        <div className="flex justify-between items-end border-l-4 border-blue-600 pl-2">
-                            <h1 className="text-xl font-bold text-gray-800">経営ダッシュボード</h1>
-                            <span className="text-xs font-bold text-gray-500">{periodText}{I ? `（前期：${formatMonth(I.period.prevStart)}${I.period.prevStart !== I.period.prevEnd ? '〜' + formatMonth(I.period.prevEnd) : ''}）` : ''}</span>
-                        </div>
-                    </>
-                );
-
-                if (!I) {
-                    return (
-                        <div className="animate-slide-up space-y-5 relative z-10">
-                            {header}
-                            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">分析データがありません。GASを最新版に更新（新バージョンでデプロイ）してから、右上の更新ボタンを押してください。</div>
-                        </div>
-                    );
+                if (!I || !I.current || !I.period) {
+                    return <div className="space-y-4">{periodBar}<div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 text-sm text-yellow-800">分析データがありません。右上の更新ボタンを押してください。</div></div>;
                 }
 
-                const C = I.current, P = I.previous;
-                const products = I.products || [];
-                const reduceList = products.filter(p => p.action === 'reduce').sort((a, b) => b.lossAmount - a.lossAmount);
-                const increaseList = products.filter(p => p.action === 'increase');
-                // 推奨どおりに収穫した場合の、月あたりのロス削減見込み（販売価格ベース）
+                const C = I.current, P = I.previous || {};
+                const rows = I.products || [];
+                const card = 'bg-white rounded-2xl border border-gray-200';
+                const Delta = ({ cur, prev, inverse = false, pt = false, money = false }) => {
+                    if (prev == null || cur == null || (!pt && !prev)) return <span className="text-xs text-gray-400">前期 —</span>;
+                    const diff = cur - prev;
+                    if (Math.round(diff) === 0) return <span className="text-xs font-bold text-gray-500">± 0</span>;
+                    const good = inverse ? diff < 0 : diff > 0;
+                    const pct = Math.round(diff / prev * 100);
+                    const text = pt ? `${Math.abs(diff)}pt` : money ? `${diff > 0 ? '+' : '−'}${yen(Math.abs(diff))}（${pct > 0 ? '+' : ''}${pct}%）` : `${diff > 0 ? '+' : '−'}${Math.abs(Math.round(diff))}`;
+                    return <span className={`text-xs font-bold ${good ? 'text-nanairo-dark' : 'text-red-600'}`}>{diff > 0 ? '▲' : '▼'} {text}</span>;
+                };
+                const sumCh = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+                const soldLine = sumCh('soldLine'), soldStore = sumCh('soldStore'), soldAgency = sumCh('soldAgency');
+
+                // --- 気づき ---
+                const reduceList = rows.filter(p => p.action === 'reduce').sort((a, b) => b.lossAmount - a.lossAmount);
+                const increaseList = rows.filter(p => p.action === 'increase');
                 const monthlySaving = Math.round(reduceList.reduce((a, p) => a + Math.max(0, p.weeklyHarvest - p.suggestedWeekly) * p.price, 0) * 4.3);
                 const wd = I.weekday || [];
                 const wdTotal = wd.reduce((a, w) => a + w.sales, 0);
                 const wdTop = wd.length ? [...wd].sort((a, b) => b.sales - a.sales)[0] : null;
-                const followUp = I.customers.followUp || [];
-
-                // --- 気づき（自動コメント） ---
+                const followUp = (I.customers && I.customers.followUp) || [];
                 const notes = [];
-                if (C.lossAmount > 0 && C.sales > 0 && C.lossAmount >= C.sales * 0.3) {
-                    notes.push({ tone: 'bad', title: `廃棄額 ${yen(C.lossAmount)} は売上の ${Math.round(C.lossAmount / C.sales * 100)}% です`, body: `収穫した ${C.harvest}P のうち ${C.loss}P（${C.lossRate}%）が廃棄。売上を伸ばすより、収穫量を合わせるほうが早く利益が改善します。` });
-                }
-                if (reduceList.length > 0) {
-                    notes.push({ tone: 'action', title: `収穫を減らす候補：${reduceList.slice(0, 3).map(p => p.name).join('・')}${reduceList.length > 3 ? ` ほか${reduceList.length - 3}品` : ''}`, body: `下の「収穫の最適化」の推奨量に合わせると、廃棄を月あたり約 ${yen(monthlySaving)} 減らせる見込みです（販売価格ベース）。` });
-                }
-                if (increaseList.length > 0) {
-                    notes.push({ tone: 'good', title: `品切れ気味：${increaseList.map(p => p.name).join('・')}`, body: 'ほぼ完売しています。収穫を少し増やすと売上が伸びる可能性があります。' });
-                }
-                if (P.sales > 0) {
-                    const d = Math.round((C.sales - P.sales) / P.sales * 100);
-                    notes.push({ tone: d >= 0 ? 'good' : 'info', title: `売上は前期比 ${d >= 0 ? '+' : ''}${d}%（${yen(P.sales)} → ${yen(C.sales)}）`, body: `内訳：店頭 ${yen(C.store)} ／ LINE ${yen(C.line)} ／ 委託 ${yen(C.agency)}${I.period.end === I.period.today.slice(0, 7) ? '　※今月は途中経過です' : ''}` });
-                }
-                if (wdTop && wdTotal > 0) {
-                    notes.push({ tone: 'info', title: `いちばん売れる曜日は ${WEEK[wdTop.day]}曜（売上の ${Math.round(wdTop.sales / wdTotal * 100)}%）`, body: '収穫はこの曜日の前日〜当日に合わせると、鮮度も廃棄も改善しやすくなります。' });
-                }
-                if (followUp.length > 0) {
-                    notes.push({ tone: 'action', title: `${followUp.length}名のお客様が しばらく注文していません`, body: '下の「要フォロー」から、公式LINEで新商品や配送開始のお知らせを送るのがおすすめです。' });
-                }
-                const noteStyle = { bad: 'border-red-200 bg-red-50', action: 'border-blue-200 bg-blue-50', good: 'border-green-200 bg-green-50', info: 'border-gray-200 bg-gray-50' };
-                const noteIcon = { bad: <Icons.AlertTriangle className="w-4 h-4 text-red-600" />, action: <Icons.ClipboardList className="w-4 h-4 text-blue-600" />, good: <Icons.TrendingUp className="w-4 h-4 text-green-700" />, info: <Icons.Activity className="w-4 h-4 text-gray-500" /> };
+                if (C.lossAmount > 0 && C.sales > 0 && C.lossAmount >= C.sales * 0.3) notes.push(['🔴', 'bg-red-50 border-red-100', `廃棄 ${yen(C.lossAmount)} は売上の ${Math.round(C.lossAmount / C.sales * 100)}%`, `収穫 ${C.harvest}個のうち ${C.loss}個（${C.lossRate}%）を廃棄。収穫量を合わせるのがいちばんの近道です。`]);
+                if (reduceList.length) notes.push(['🟠', 'bg-amber-50 border-amber-100', `収穫を減らす候補：${reduceList.slice(0, 3).map(p => p.name).join('・')}${reduceList.length > 3 ? ` ほか${reduceList.length - 3}品` : ''}`, `下の表の「週の収穫の目安」に合わせると、廃棄を月 約${yen(monthlySaving)} 減らせる見込みです。`]);
+                if (increaseList.length) notes.push(['🟢', 'bg-green-50 border-green-100', `品切れ気味：${increaseList.map(p => p.name).join('・')}`, 'ほぼ売り切れています。収穫を少し増やすと売上が伸びる可能性があります。']);
+                if (P.sales > 0) { const d = Math.round((C.sales - P.sales) / P.sales * 100); notes.push([d >= 0 ? '🟢' : '⚪', d >= 0 ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-200', `売上は前期比 ${d >= 0 ? '+' : ''}${d}%（${yen(P.sales)} → ${yen(C.sales)}）`, `店頭 ${yen(C.store)}／LINE ${yen(C.line)}／委託 ${yen(C.agency)}${I.period.end === I.period.today.slice(0, 7) ? '　※今月は途中経過' : ''}`]); }
+                if (wdTop && wdTotal > 0) notes.push(['⚪', 'bg-gray-50 border-gray-200', `いちばん売れる曜日は ${WEEK[wdTop.day]}曜（売上の ${Math.round(wdTop.sales / wdTotal * 100)}%）`, 'この曜日の前日〜当日に収穫を合わせると、鮮度も廃棄も改善しやすくなります。']);
+                if (followUp.length) notes.push(['🔵', 'bg-blue-50 border-blue-100', `${followUp.length}人のお客様がしばらく注文していません`, '「お客様」タブの「声かけ」から、公式LINEで一声かけるのがおすすめです。']);
 
-                // --- 12か月推移チャート（SVG） ---
-                // データが始まる前の空の月は表示しない
-                const allMonths = I.monthly || [];
-                const firstIdx = allMonths.findIndex(m => m.line + m.store + m.agency + m.lossAmount + m.harvest > 0);
-                const months = firstIdx > 0 ? allMonths.slice(firstIdx) : allMonths;
-                const W = 360, H = 190, padL = 38, padR = 8, padT = 14, padB = 26;
-                const maxY = Math.max(1000, ...months.map(m => Math.max(m.line + m.store + m.agency, m.lossAmount)));
-                const niceStep = (() => { const raw = maxY / 4; const pow = Math.pow(10, Math.floor(Math.log10(raw))); const n = raw / pow; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow; })();
-                const yMax = niceStep * Math.ceil(maxY / niceStep);
-                const yOf = v => padT + (H - padT - padB) * (1 - v / yMax);
-                const slot = (W - padL - padR) / Math.max(1, months.length);
-                const barW = Math.min(18, slot * 0.6);
-                const xOf = i => padL + slot * i + slot / 2;
-                const ticks = []; for (let v = 0; v <= yMax; v += niceStep) ticks.push(v);
-                const shortYen = v => v >= 10000 ? `${(v / 10000).toFixed(v % 10000 ? 1 : 0)}万` : v.toLocaleString();
-                const lossPath = months.map((m, i) => `${i ? 'L' : 'M'}${xOf(i).toFixed(1)},${yOf(m.lossAmount).toFixed(1)}`).join(' ');
-                const hoverM = trendHover != null ? months[trendHover] : null;
+                // --- 12か月の推移 ---
+                const all = I.monthly || [];
+                const first = all.findIndex(m => m.line + m.store + m.agency + m.lossAmount + m.harvest > 0);
+                const months = first > 0 ? all.slice(first) : all;
+                const W = 700, H = 220, pl = 44, pr = 10, pt = 16, pb = 28;
+                const qtyMode = anChartMode === 'qty';
+                const vals = months.map(m => qtyMode ? Math.max(m.sold, m.harvest) : Math.max(m.line + m.store + m.agency, m.lossAmount));
+                const maxY = Math.max(qtyMode ? 10 : 1000, ...vals);
+                const step = (() => { const raw = maxY / 4; const pow = Math.pow(10, Math.floor(Math.log10(raw))); const n = raw / pow; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow; })();
+                const yMax = step * Math.ceil(maxY / step);
+                const yOf = v => pt + (H - pt - pb) * (1 - v / yMax);
+                const slot = (W - pl - pr) / Math.max(1, months.length);
+                const bw = Math.min(30, slot * 0.55);
+                const xOf = i => pl + slot * i + slot / 2;
+                const ticks = []; for (let v = 0; v <= yMax; v += step) ticks.push(v);
+                const shortV = v => qtyMode ? v : v >= 10000 ? `${(v / 10000).toFixed(v % 10000 ? 1 : 0)}万` : v.toLocaleString();
+                const linePts = months.map((m, i) => `${xOf(i).toFixed(1)},${yOf(qtyMode ? m.harvest : m.lossAmount).toFixed(1)}`).join(' ');
+                const hov = trendHover != null ? months[trendHover] : null;
 
-                // --- 商品の並び：減らす → 増やす → 適正、各グループ内は廃棄額順 ---
-                const order = { reduce: 0, increase: 1, keep: 2 };
-                const productRows = [...products].sort((a, b) => (order[a.action] - order[b.action]) || (b.lossAmount - a.lossAmount));
-                const actionBadge = {
-                    reduce: <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">▼ 減らす</span>,
-                    increase: <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">▲ 増やす</span>,
-                    keep: <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5">● 適正</span>
-                };
-                const wdMax = Math.max(1, ...wd.map(w => w.sales));
+                // --- 商品別の表 ---
+                const sortKeys = { name: r => r.name, harvest: r => r.harvest, sold: r => r.sold, loss: r => r.loss, sellThrough: r => r.sellThrough == null ? -1 : r.sellThrough, lossAmount: r => r.lossAmount, sales: r => r.sales, diff: r => r.sales - (r.prevSales || 0) };
+                const tableRows = rows.filter(r => anFilter === 'all' || r.action === anFilter)
+                    .sort((a, b) => { const f = sortKeys[anSort] || sortKeys.sales; const x = f(a), y = f(b); return (typeof x === 'string' ? x.localeCompare(y, 'ja') : x - y) * (anDir === 'asc' ? 1 : -1); });
+                const shownRows = anShowAll ? tableRows : tableRows.slice(0, 6);
+                const th = (k, label, cls = '') => <th onClick={() => { if (anSort === k) setAnDir(anDir === 'asc' ? 'desc' : 'asc'); else { setAnSort(k); setAnDir(k === 'name' ? 'asc' : 'desc'); } }} className={`px-2 py-2 text-[11px] font-bold text-gray-500 whitespace-nowrap cursor-pointer select-none ${cls}`}>{label}{anSort === k ? (anDir === 'asc' ? ' ▲' : ' ▼') : ''}</th>;
+                const actionChip = (a) => a === 'reduce' ? <span className="text-[10px] font-bold text-white bg-red-500 px-1.5 py-0.5 rounded">減らす</span> : a === 'increase' ? <span className="text-[10px] font-bold text-white bg-nanairo-dark px-1.5 py-0.5 rounded">増やす</span> : <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">そのまま</span>;
+
+                // --- 受け取り時間帯（店頭） ---
+                const slots = {};
+                orders.filter(o => o.status !== 'キャンセル' && o.deliveryMethod !== '配送' && inViewPeriod(o)).forEach(o => { const h = String(o.pickupTime).slice(0, 2); if (h) slots[h] = (slots[h] || 0) + 1; });
+                const slotKeys = ['11', '12', '13', '14', '15', '16'];
+                const slotMax = Math.max(1, ...slotKeys.map(h => slots[h] || 0));
+
+                // --- お客様・委託・請求 ---
+                const topCust = customerList.filter(c => c.spend > 0).sort((a, b) => b.spend - a.spend).slice(0, 5);
+                const agencyRates = (analytics && analytics.agencyLossRates) || [];
+                const billing = customerList.map(c => ({ c, list: c.orders.filter(o => o.status === '受渡済' && inViewPeriod(o)) }))
+                    .filter(x => x.list.length > 0).map(x => ({ ...x, amount: x.list.reduce((a, o) => a + Number(o.totalPrice || 0), 0), unpaid: x.list.filter(o => !o.paidChecked).length }))
+                    .sort((a, b) => b.amount - a.amount);
+                const cu = I.customers || {};
+                const CHC = { line: '#0F9A44', store: '#3B82F6', agency: '#F59E0B', loss: '#EF4444' };
 
                 return (
-                    <div className="animate-slide-up space-y-5 relative z-10">
-                        {header}
+                    <div className="space-y-4">
+                        {periodBar}
 
-                        {/* ① KPI */}
-                        <div className="grid grid-cols-2 gap-3">
-                            <Kpi label="売上合計（税込）" value={yen(C.sales)} sub={`店頭 ${yen(C.store)}・LINE ${yen(C.line)}・委託 ${yen(C.agency)}`}><Delta cur={C.sales} prev={P.sales} /></Kpi>
-                            <Kpi label="販売数" value={<>{C.qty.toLocaleString()} <span className="text-sm font-normal text-gray-500">P</span></>} sub={`収穫 ${C.harvest}P に対して`}><Delta cur={C.qty} prev={P.qty} /></Kpi>
-                            <Kpi label="販売率（売れた割合）" value={C.sellThrough == null ? '—' : `${C.sellThrough}%`} sub="販売数 ÷ 収穫数"><Delta cur={C.sellThrough} prev={P.sellThrough} pt /></Kpi>
-                            <Kpi label="廃棄額（販売価格換算）" tone={C.sales > 0 && C.lossAmount >= C.sales * 0.3 ? 'bad' : undefined} value={yen(C.lossAmount)} sub={`${C.loss}P・収穫の ${C.lossRate ?? '—'}%`}><Delta cur={C.lossAmount} prev={P.lossAmount} inverse /></Kpi>
-                            <Kpi label="LINE注文" value={<>{C.lineOrders} <span className="text-sm font-normal text-gray-500">件</span></>} sub={`平均 ${yen(C.avgLineOrder)} ／ 配送 ${C.delivery}件・店頭 ${C.pickup}件`}><Delta cur={C.lineOrders} prev={P.lineOrders} /></Kpi>
-                            <Kpi label="店頭販売" value={<>{C.storeTx} <span className="text-sm font-normal text-gray-500">回</span></>} sub={`1回あたり ${yen(C.storeTx ? C.store / C.storeTx : 0)}`}><Delta cur={C.storeTx} prev={P.storeTx} /></Kpi>
+                        {/* 数字のカード */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className={`${card} p-3`}>
+                                <div className="text-xs text-gray-500">売上合計</div><div className="text-2xl font-bold">{yen(C.sales)}</div><Delta cur={C.sales} prev={P.sales} money />
+                                <div className="flex h-1.5 rounded-full overflow-hidden mt-2 bg-gray-100">{C.sales > 0 && ['line', 'store', 'agency'].map(k => <div key={k} style={{ width: `${C[k] / C.sales * 100}%`, background: CHC[k] }}></div>)}</div>
+                                <div className="flex flex-wrap gap-x-2 text-[10px] text-gray-500 mt-1"><span style={{ color: CHC.line }}>■</span>LINE {yen(C.line)}<span style={{ color: CHC.store }}>■</span>店頭 {yen(C.store)}<span style={{ color: CHC.agency }}>■</span>委託 {yen(C.agency)}</div>
+                            </div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">廃棄額</div><div className="text-2xl font-bold text-red-500">{yen(C.lossAmount)}</div><Delta cur={C.lossAmount} prev={P.lossAmount} inverse money /><div className="text-xs text-gray-500 mt-2">廃棄 {C.loss}個</div></div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">廃棄率（廃棄 ÷ 収穫）</div><div className={`text-2xl font-bold ${C.lossRate >= 30 ? 'text-red-500' : ''}`}>{C.lossRate != null ? `${C.lossRate}%` : '—'}</div><Delta cur={C.lossRate} prev={P.lossRate} inverse pt />
+                                <div className="relative w-full h-1.5 bg-gray-100 rounded-full mt-2"><div className="h-full bg-red-400 rounded-full" style={{ width: `${Math.min(100, C.lossRate || 0)}%` }}></div><div className="absolute top-[-3px] w-0.5 h-3 bg-gray-700" style={{ left: '30%' }}></div></div><div className="text-[10px] text-gray-500 mt-1">目標 30% 以下（｜の位置）</div></div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">販売率（売れた ÷ 収穫）</div><div className="text-2xl font-bold">{C.sellThrough != null ? `${C.sellThrough}%` : '—'}</div><Delta cur={C.sellThrough} prev={P.sellThrough} pt /><div className="text-xs text-gray-500 mt-2">収穫 {C.harvest}個 → 売れた {C.qty}個</div></div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">LINE注文</div><div className="text-2xl font-bold">{C.lineOrders}件</div><Delta cur={C.lineOrders} prev={P.lineOrders} /><div className="text-xs text-gray-500 mt-2">店頭受取 {C.pickup}件・配送 {C.delivery}件</div></div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">LINE注文の平均単価</div><div className="text-2xl font-bold">{yen(C.avgLineOrder)}</div><Delta cur={C.avgLineOrder} prev={P.avgLineOrder} money /><div className="text-xs text-gray-500 mt-2">配送料の合計 {yen(C.shipping)}</div></div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">店頭販売</div><div className="text-2xl font-bold">{yen(C.store)}</div><Delta cur={C.store} prev={P.store} money /><div className="text-xs text-gray-500 mt-2">会計 {C.storeTx}回・{soldStore}個</div></div>
+                            <div className={`${card} p-3`}><div className="text-xs text-gray-500">お客様（LINE）</div><div className="text-2xl font-bold">{cu.active || 0}人</div><div className="text-xs font-bold text-nanairo-dark">新規 +{cu.newCount || 0}人</div><div className="text-xs text-gray-500 mt-2">リピート率 {cu.repeatRate || 0}%・声かけ候補 {followUp.length}人</div></div>
                         </div>
 
-                        {/* ② 気づき */}
+                        {/* 気づき */}
                         {notes.length > 0 && (
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <h3 className="font-bold text-gray-800 text-sm mb-3 flex items-center gap-2"><Icons.Award className="w-4 h-4 text-blue-600" /> 今期の気づき・打ち手</h3>
-                                <div className="space-y-2">
-                                    {notes.map((n, i) => (
-                                        <div key={i} className={`rounded-lg border p-3 ${noteStyle[n.tone]}`}>
-                                            <div className="flex items-start gap-2"><span className="mt-0.5 shrink-0">{noteIcon[n.tone]}</span><div><div className="text-sm font-bold text-gray-900 leading-snug">{n.title}</div><div className="text-[11px] text-gray-600 mt-1 leading-relaxed">{n.body}</div></div></div>
-                                        </div>
-                                    ))}
+                            <div className={`${card} p-4`}>
+                                <div className="text-sm font-bold text-gray-700 mb-2">💡 気づきと打ち手</div>
+                                <div className="grid lg:grid-cols-2 gap-2">
+                                    {notes.map(([icon, cls, title, body], i) => <div key={i} className={`flex gap-2 p-2.5 rounded-xl border ${cls}`}><span>{icon}</span><div><b className="text-sm text-gray-900">{title}</b><div className="text-xs text-gray-600 mt-0.5">{body}</div></div></div>)}
                                 </div>
                             </div>
                         )}
 
-                        {/* ③ 12か月推移 */}
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <div className="flex justify-between items-center mb-2">
-                                <h3 className="font-bold text-gray-800 text-sm">売上と廃棄の推移（月別）</h3>
-                                <button type="button" onClick={() => setShowTrendTable(!showTrendTable)} className="text-[11px] font-bold text-blue-600">{showTrendTable ? 'グラフで見る' : '表で見る'}</button>
-                            </div>
-                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-700 mb-2">
-                                {CH.map(c => <span key={c.key} className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: c.color }}></span>{c.label}</span>)}
-                                <span className="flex items-center gap-1"><svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="#6b7280" strokeWidth="2" strokeDasharray="4 2" /></svg>廃棄額</span>
-                            </div>
-                            {showTrendTable ? (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-[11px] text-right">
-                                        <thead className="text-gray-500"><tr><th className="text-left py-1">月</th><th>店頭</th><th>LINE</th><th>委託</th><th>合計</th><th>廃棄額</th></tr></thead>
-                                        <tbody>{months.map(m => (<tr key={m.month} className="border-t border-gray-100"><td className="text-left py-1 font-bold">{m.month.slice(2).replace('-', '/')}</td><td>{m.store.toLocaleString()}</td><td>{m.line.toLocaleString()}</td><td>{m.agency.toLocaleString()}</td><td className="font-bold">{(m.store + m.line + m.agency).toLocaleString()}</td><td className="text-gray-500">{m.lossAmount.toLocaleString()}</td></tr>))}</tbody>
-                                    </table>
+                        <div className="grid lg:grid-cols-3 gap-4">
+                            {/* 推移 */}
+                            <div className={`${card} p-4 lg:col-span-2`}>
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="text-sm font-bold text-gray-700">{qtyMode ? '販売数と収穫数の推移' : '売上と廃棄の推移'}（{months.length}か月）</div>
+                                    <div className="flex gap-1 text-[11px] font-bold">
+                                        {[['amount', '金額'], ['qty', '個数'], ['table', '表で見る']].map(([k, l]) => <button key={k} type="button" onClick={() => setAnChartMode(k)} className={`px-2 py-1 rounded ${anChartMode === k ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>{l}</button>)}
+                                    </div>
                                 </div>
-                            ) : (
-                                <div className="relative">
-                                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="直近12か月の月別売上（チャネル別）と廃棄額の推移">
-                                        {ticks.map(v => (<g key={v}><line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#e5e7eb" strokeWidth="1" /><text x={padL - 4} y={yOf(v) + 3} textAnchor="end" fontSize="9" fill="#6b7280">{shortYen(v)}</text></g>))}
+                                {anChartMode === 'table' ? (
+                                    <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-gray-500 border-b border-gray-200"><th className="text-left py-1.5">月</th><th className="text-right">LINE</th><th className="text-right">店頭</th><th className="text-right">委託</th><th className="text-right">売上計</th><th className="text-right">廃棄額</th><th className="text-right">収穫</th><th className="text-right">販売数</th></tr></thead>
+                                        <tbody className="divide-y divide-gray-100">{months.slice().reverse().map(m => <tr key={m.month}><td className="py-1.5">{fmtM(m.month)}</td><td className="text-right">{yen(m.line)}</td><td className="text-right">{yen(m.store)}</td><td className="text-right">{yen(m.agency)}</td><td className="text-right font-bold">{yen(m.line + m.store + m.agency)}</td><td className="text-right text-red-500">{yen(m.lossAmount)}</td><td className="text-right">{m.harvest}</td><td className="text-right">{m.sold}</td></tr>)}</tbody></table></div>
+                                ) : (<>
+                                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+                                        {ticks.map(v => <g key={v}><line x1={pl} x2={W - pr} y1={yOf(v)} y2={yOf(v)} stroke={v ? '#F3F4F6' : '#E5E7EB'} /><text x={pl - 6} y={yOf(v) + 3} fontSize="10" fill="#9CA3AF" textAnchor="end">{shortV(v)}</text></g>)}
                                         {months.map((m, i) => {
+                                            const x = xOf(i) - bw / 2;
+                                            const segs = qtyMode ? [['sold', m.sold, CHC.line]] : [['line', m.line, CHC.line], ['store', m.store, CHC.store], ['agency', m.agency, CHC.agency]];
                                             let acc = 0;
-                                            const segs = CH.map(c => { const v = m[c.key]; const y0 = yOf(acc), y1 = yOf(acc + v); acc += v; return { c, v, y: y1, h: Math.max(0, y0 - y1) }; }).filter(sg => sg.v > 0);
+                                            return <g key={m.month} onClick={() => setTrendHover(trendHover === i ? null : i)} style={{ cursor: 'pointer' }}>
+                                                <rect x={xOf(i) - slot / 2} y={pt} width={slot} height={H - pt - pb} fill={trendHover === i ? '#F9FAFB' : 'transparent'} />
+                                                {segs.map(([k, v, col]) => { const y1 = yOf(acc + v), y0 = yOf(acc); acc += v; return v > 0 ? <rect key={k} x={x} y={y1} width={bw} height={y0 - y1} fill={col} /> : null; })}
+                                                <text x={xOf(i)} y={H - 10} fontSize="10" fill={m.month === I.period.end ? '#111' : '#6B7280'} fontWeight={m.month === I.period.end ? 700 : 400} textAnchor="middle">{Number(m.month.slice(5))}月</text>
+                                            </g>;
+                                        })}
+                                        <polyline fill="none" stroke={qtyMode ? '#9CA3AF' : CHC.loss} strokeWidth="2.5" strokeDasharray={qtyMode ? '5 4' : ''} points={linePts} />
+                                        {months.map((m, i) => <circle key={m.month} cx={xOf(i)} cy={yOf(qtyMode ? m.harvest : m.lossAmount)} r="3" fill={qtyMode ? '#9CA3AF' : CHC.loss} />)}
+                                    </svg>
+                                    <div className="flex flex-wrap gap-3 text-[11px] text-gray-600">
+                                        {qtyMode ? <><span><span style={{ color: CHC.line }}>■</span> 売れた数</span><span className="text-gray-500">- - 収穫数</span></>
+                                            : <><span><span style={{ color: CHC.line }}>■</span> LINE注文</span><span><span style={{ color: CHC.store }}>■</span> 店頭販売</span><span><span style={{ color: CHC.agency }}>■</span> 委託</span><span style={{ color: CHC.loss }}>━ 廃棄額</span></>}
+                                        <span className="ml-auto text-gray-400">棒をタップで内訳</span>
+                                    </div>
+                                    {hov && <div className="mt-2 text-xs bg-gray-50 rounded-xl p-2.5 grid grid-cols-2 gap-x-4 gap-y-0.5"><b className="col-span-2">{fmtM(hov.month)}</b><span>LINE {yen(hov.line)}</span><span>店頭 {yen(hov.store)}</span><span>委託 {yen(hov.agency)}</span><span className="text-red-500">廃棄 {yen(hov.lossAmount)}</span><span>収穫 {hov.harvest}個</span><span>売れた {hov.sold}個</span></div>}
+                                </>)}
+                            </div>
+
+                            {/* 収穫のゆくえ */}
+                            <div className={`${card} p-4`}>
+                                <div className="text-sm font-bold text-gray-700 mb-3">収穫した{C.harvest}個のゆくえ</div>
+                                {C.harvest > 0 ? (
+                                    <div className="space-y-2 text-sm">
+                                        {[['LINE注文で売れた', soldLine, CHC.line], ['店頭で売れた', soldStore, CHC.store], ['委託で売れた', soldAgency, CHC.agency], ['廃棄', C.loss, CHC.loss]].map(([l, v, col]) => (
+                                            <div key={l}><div className="flex justify-between"><span className={l === '廃棄' ? 'text-red-500 font-bold' : ''}>{l}</span><b className={l === '廃棄' ? 'text-red-500' : ''}>{v}個</b></div><div className="h-2.5 bg-gray-100 rounded-full"><div className="h-full rounded-full" style={{ width: `${Math.min(100, v / C.harvest * 100)}%`, background: col }}></div></div></div>
+                                        ))}
+                                        <div className="flex justify-between text-xs text-gray-500 pt-1"><span>残り（在庫・未記録など）</span><span>{Math.max(0, C.harvest - soldLine - soldStore - soldAgency - C.loss)}個</span></div>
+                                    </div>
+                                ) : <div className="text-sm text-gray-400">この期間の収穫の記録がありません</div>}
+                                {C.lossAmount > 0 && <div className="mt-4 p-2.5 rounded-xl bg-gray-50 text-xs text-gray-600 leading-relaxed">廃棄を半分にすると <b className="text-nanairo-dark">{yen(C.lossAmount / 2)}</b> 相当の損が減ります。</div>}
+                            </div>
+                        </div>
+
+                        {/* 商品別 */}
+                        <div className={`${card} p-4`}>
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                                <div className="text-sm font-bold text-gray-700">商品別 <span className="text-xs font-normal text-gray-500">見出しをタップで並べ替え</span></div>
+                                <div className="flex gap-1 text-[11px] font-bold">
+                                    {[['all', 'すべて', rows.length], ['reduce', '減らす', reduceList.length], ['increase', '増やす', increaseList.length]].map(([k, l, n]) => <button key={k} type="button" onClick={() => setAnFilter(k)} className={`px-2 py-1 rounded ${anFilter === k ? 'bg-gray-900 text-white' : k === 'reduce' ? 'bg-red-50 text-red-600' : k === 'increase' ? 'bg-green-50 text-nanairo-dark' : 'bg-gray-100 text-gray-600'}`}>{l} {n}</button>)}
+                                </div>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="border-b border-gray-200"><tr>{th('name', '商品', 'text-left')}{th('harvest', '収穫', 'text-right')}{th('sold', '売れた（LINE／店頭／委託）', 'text-left')}{th('loss', '廃棄', 'text-right')}{th('sellThrough', '販売率', 'text-left')}{th('lossAmount', '廃棄額', 'text-right')}{th('sales', '売上', 'text-right')}{th('diff', '前期比', 'text-right')}<th className="px-2 py-2 text-[11px] font-bold text-gray-500 text-right whitespace-nowrap">週の収穫 → 目安</th></tr></thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {shownRows.map(r => {
+                                            const pd = r.prevSales ? Math.round((r.sales - r.prevSales) / r.prevSales * 100) : null;
                                             return (
-                                                <g key={m.month} onMouseEnter={() => setTrendHover(i)} onMouseLeave={() => setTrendHover(null)} onClick={() => setTrendHover(trendHover === i ? null : i)} style={{ cursor: 'pointer' }}>
-                                                    <rect x={xOf(i) - slot / 2} y={padT} width={slot} height={H - padT - padB} fill={trendHover === i ? '#f3f4f6' : 'transparent'} />
-                                                    {segs.map((sg, k) => {
-                                                        const isTop = k === segs.length - 1;
-                                                        // 2pxの隙間で積み上げを区切り、いちばん上だけ角を丸める
-                                                        const h = Math.max(0, sg.h - (k > 0 ? 2 : 0));
-                                                        return isTop
-                                                            ? <path key={sg.c.key} d={`M${xOf(i) - barW / 2},${sg.y + h} V${sg.y + Math.min(3, h)} Q${xOf(i) - barW / 2},${sg.y} ${xOf(i) - barW / 2 + 3},${sg.y} H${xOf(i) + barW / 2 - 3} Q${xOf(i) + barW / 2},${sg.y} ${xOf(i) + barW / 2},${sg.y + Math.min(3, h)} V${sg.y + h} Z`} fill={sg.c.color} />
-                                                            : <rect key={sg.c.key} x={xOf(i) - barW / 2} y={sg.y} width={barW} height={h} fill={sg.c.color} />;
-                                                    })}
-                                                    <text x={xOf(i)} y={H - padB + 12} textAnchor="middle" fontSize="9" fill={m.month.endsWith('-01') ? '#374151' : '#6b7280'} fontWeight={m.month.endsWith('-01') ? 'bold' : 'normal'}>{m.month.endsWith('-01') ? m.month.slice(2, 4) + '/1' : Number(m.month.slice(5)) + '月'}</text>
-                                                </g>
+                                                <tr key={r.id}>
+                                                    <td className="px-2 py-2 font-bold whitespace-nowrap">{r.name}</td>
+                                                    <td className="px-2 py-2 text-right">{r.harvest}</td>
+                                                    <td className="px-2 py-2 min-w-[140px]"><div className="flex h-2 w-full rounded overflow-hidden bg-gray-100">{r.harvest > 0 && [['soldLine', CHC.line], ['soldStore', CHC.store], ['soldAgency', CHC.agency]].map(([k, col]) => <div key={k} style={{ width: `${Math.min(100, r[k] / r.harvest * 100)}%`, background: col }}></div>)}</div><span className="text-[10px] text-gray-500">{r.soldLine}／{r.soldStore}／{r.soldAgency}＝{r.sold}</span></td>
+                                                    <td className={`px-2 py-2 text-right ${r.lossRate >= 30 ? 'text-red-500 font-bold' : ''}`}>{r.loss}</td>
+                                                    <td className="px-2 py-2"><div className="flex items-center gap-1"><div className="w-14 h-1.5 bg-gray-100 rounded-full"><div className="h-full bg-nanairo-dark rounded-full" style={{ width: `${Math.min(100, r.sellThrough || 0)}%` }}></div></div><span className="text-xs">{r.sellThrough != null ? `${r.sellThrough}%` : '—'}</span></div></td>
+                                                    <td className={`px-2 py-2 text-right whitespace-nowrap ${r.lossAmount ? 'text-red-500' : ''}`}>{yen(r.lossAmount)}</td>
+                                                    <td className="px-2 py-2 text-right whitespace-nowrap">{yen(r.sales)}</td>
+                                                    <td className={`px-2 py-2 text-right text-xs whitespace-nowrap ${pd == null ? 'text-gray-400' : pd >= 0 ? 'text-nanairo-dark' : 'text-red-500'}`}>{pd == null ? '—' : `${pd > 0 ? '+' : ''}${pd}%`}</td>
+                                                    <td className="px-2 py-2 text-right whitespace-nowrap"><span className="text-xs text-gray-400">{r.weeklyHarvest}</span> → <b>{r.suggestedWeekly}</b> {actionChip(r.action)}</td>
+                                                </tr>
                                             );
                                         })}
-                                        <path d={lossPath} fill="none" stroke="#6b7280" strokeWidth="2" strokeDasharray="4 3" pointerEvents="none" />
-                                        {months.map((m, i) => m.lossAmount > 0 && <circle key={i} cx={xOf(i)} cy={yOf(m.lossAmount)} r="3" fill="#fff" stroke="#6b7280" strokeWidth="2" pointerEvents="none" />)}
-                                        <line x1={padL} x2={W - padR} y1={yOf(0)} y2={yOf(0)} stroke="#9ca3af" strokeWidth="1" />
-                                    </svg>
-                                    {hoverM && (
-                                        <div className={`absolute top-0 ${trendHover > months.length / 2 - 1 ? 'left-10' : 'right-0'} bg-gray-900/95 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg pointer-events-none`}>
-                                            <div className="font-bold mb-1">{hoverM.month.replace('-', '年')}月</div>
-                                            {CH.map(c => <div key={c.key} className="flex justify-between gap-4"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: c.color }}></span>{c.label}</span><span>{yen(hoverM[c.key])}</span></div>)}
-                                            <div className="flex justify-between gap-4 border-t border-white/20 mt-1 pt-1 font-bold"><span>合計</span><span>{yen(hoverM.line + hoverM.store + hoverM.agency)}</span></div>
-                                            <div className="flex justify-between gap-4 text-gray-300"><span>廃棄額</span><span>{yen(hoverM.lossAmount)}</span></div>
-                                        </div>
-                                    )}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {tableRows.length > 6 && <button type="button" onClick={() => setAnShowAll(!anShowAll)} className="w-full text-center text-xs font-bold text-gray-500 py-2">{anShowAll ? '閉じる' : `すべて表示（ほか${tableRows.length - 6}商品）`}</button>}
+                            <p className="text-[11px] text-gray-500 mt-1">目安＝この期間の週平均の販売数 × 1.15（欠品を防ぐ余裕）。「在庫」→「まとめて入力」の目安にも使われます。</p>
+                        </div>
+
+                        <div className="grid lg:grid-cols-3 gap-4">
+                            {/* 曜日・時間帯 */}
+                            <div className={`${card} p-4`}>
+                                <div className="text-sm font-bold text-gray-700 mb-2">曜日別の売上</div>
+                                <div className="flex items-end gap-2 h-28">
+                                    {WEEK.map((w, i) => { const v = (wd.find(x => x.day === i) || {}).sales || 0; const mx = Math.max(1, ...wd.map(x => x.sales)); return (
+                                        <div key={w} className="flex-1 flex flex-col items-center justify-end h-full">
+                                            <span className="text-[9px] text-gray-500">{v ? (v >= 10000 ? `${(v / 10000).toFixed(1)}万` : v.toLocaleString()) : ''}</span>
+                                            <div className="w-full rounded-t" style={{ height: `${v / mx * 80}%`, background: v === mx && v ? CHC.line : '#A7D7B5' }}></div>
+                                            <span className={`text-[10px] mt-1 ${v === mx && v ? 'font-bold' : ''}`}>{w}</span>
+                                        </div>); })}
                                 </div>
-                            )}
-                            <p className="text-[10px] text-gray-500 mt-1">棒グラフをタップすると内訳が出ます。廃棄額が売上の棒を上回る月は、収穫しすぎのサインです。</p>
-                        </div>
-
-                        {/* ④ 収穫の最適化 */}
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <h3 className="font-bold text-gray-800 text-sm mb-1">商品別 収穫の最適化</h3>
-                            <p className="text-[10px] text-gray-500 mb-3">推奨収穫量 ＝ 週平均の販売数 × 1.15（品切れを防ぐ15%の余裕）。バーは収穫量の内訳（<span className="text-green-700 font-bold">販売</span>／<span className="text-gray-600 font-bold">廃棄</span>／残り）です。</p>
-                            <div className="space-y-3">
-                                {productRows.map(p => {
-                                    const soldPct = p.harvest ? Math.min(100, p.sold / p.harvest * 100) : 0;
-                                    const lossPct = p.harvest ? Math.min(100 - soldPct, p.loss / p.harvest * 100) : 0;
-                                    return (
-                                        <div key={p.id} className="border-b border-gray-100 pb-3 last:border-0 last:pb-0">
-                                            <div className="flex justify-between items-center mb-1.5 gap-2">
-                                                <div className="flex items-center gap-1.5 min-w-0"><span className="text-sm font-bold text-gray-800 truncate">{p.name}</span>{actionBadge[p.action]}</div>
-                                                <div className="text-[11px] text-gray-500 shrink-0">売上 <span className="font-bold text-gray-800">{yen(p.sales)}</span></div>
-                                            </div>
-                                            <div className="w-full h-2.5 rounded-full bg-gray-100 overflow-hidden flex gap-[2px]" title={`販売 ${p.sold}P / 廃棄 ${p.loss}P / 収穫 ${p.harvest}P`}>
-                                                {soldPct > 0 && <div className="h-full bg-green-600 rounded-l-full" style={{ width: `${soldPct}%` }}></div>}
-                                                {lossPct > 0 && <div className="h-full bg-gray-400" style={{ width: `${lossPct}%` }}></div>}
-                                            </div>
-                                            <div className="flex justify-between items-center mt-1.5 text-[11px] text-gray-600">
-                                                <span>販売率 <span className="font-bold text-gray-900">{p.sellThrough ?? '—'}%</span>・廃棄 {p.loss}P（{yen(p.lossAmount)}）</span>
-                                                <span className="shrink-0">週 <span className="font-bold">{p.weeklyHarvest}P</span> → 推奨 <span className={`font-bold ${p.action === 'reduce' ? 'text-red-700' : p.action === 'increase' ? 'text-green-700' : 'text-gray-900'}`}>{p.suggestedWeekly}P</span></span>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                {productRows.length === 0 && <p className="text-sm text-gray-500 text-center py-4">データがありません</p>}
-                            </div>
-                        </div>
-
-                        {/* ⑤ 曜日別 */}
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <h3 className="font-bold text-gray-800 text-sm mb-1">曜日別の売上（店頭販売＋LINE注文）</h3>
-                            <p className="text-[10px] text-gray-500 mb-3">店頭は記録した日、LINEは受取日で集計しています。</p>
-                            <div className="flex items-end gap-2 h-28">
-                                {[1, 2, 3, 4, 5, 6, 0].map(d => {
-                                    const w = wd[d] || { sales: 0, qty: 0 };
-                                    const isTop = wdTop && d === wdTop.day && w.sales > 0;
-                                    return (
-                                        <div key={d} className="flex-1 flex flex-col items-center justify-end h-full" title={`${WEEK[d]}曜 ${yen(w.sales)}（${w.qty}P）`}>
-                                            <span className={`text-[10px] mb-0.5 ${isTop ? 'font-bold text-gray-900' : 'text-gray-500'}`}>{w.sales ? shortYen(w.sales) : ''}</span>
-                                            <div className={`w-full max-w-[28px] rounded-t ${isTop ? 'bg-blue-600' : 'bg-blue-300'}`} style={{ height: `${Math.max(w.sales ? 4 : 0, w.sales / wdMax * 80)}%` }}></div>
-                                            <span className={`text-[11px] mt-1 ${d === 1 ? 'text-gray-400' : 'text-gray-700'} font-bold`}>{WEEK[d]}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* ⑥ 顧客 */}
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <h3 className="font-bold text-gray-800 text-sm mb-3">LINE顧客の状況</h3>
-                            <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-                                <div className="bg-gray-50 rounded-lg p-2"><div className="text-[10px] text-gray-500 font-bold">累計顧客</div><div className="text-lg font-bold text-gray-900">{I.customers.total}<span className="text-xs font-normal">人</span></div></div>
-                                <div className="bg-gray-50 rounded-lg p-2"><div className="text-[10px] text-gray-500 font-bold">今期 注文者</div><div className="text-lg font-bold text-gray-900">{I.customers.active}<span className="text-xs font-normal">人</span></div><div className="text-[10px] text-gray-500">うち新規 {I.customers.newCount}</div></div>
-                                <div className="bg-gray-50 rounded-lg p-2"><div className="text-[10px] text-gray-500 font-bold">リピート率</div><div className="text-lg font-bold text-gray-900">{I.customers.repeatRate}<span className="text-xs font-normal">%</span></div><div className="text-[10px] text-gray-500">2回以上 {I.customers.repeaters}人</div></div>
-                            </div>
-                            <div className="text-xs font-bold text-gray-700 mb-2">要フォロー（しばらく注文がないお客様）</div>
-                            {followUp.length > 0 ? (
-                                <div className="space-y-1.5">
-                                    {followUp.map(c => (
-                                        <div key={c.id} className="flex justify-between items-center bg-orange-50/50 border border-orange-100 rounded-lg px-3 py-2">
-                                            <div><div className="text-sm font-bold text-gray-800">{c.name} 様</div><div className="text-[10px] text-gray-500">注文 {c.orders}回・累計 {yen(c.spend)}{c.avgGapDays ? `・いつもは${c.avgGapDays}日ごと` : ''}</div></div>
-                                            <div className="text-right"><div className="text-sm font-bold text-orange-700">{c.daysSince}日</div><div className="text-[10px] text-gray-500">前が最後</div></div>
-                                        </div>
-                                    ))}
+                                <div className="text-sm font-bold text-gray-700 mt-4 mb-1.5">受け取り時間帯（店頭）</div>
+                                <div className="grid grid-cols-6 gap-1 text-center text-[10px]">
+                                    {slotKeys.map(h => { const n = slots[h] || 0; return <div key={h} className="rounded py-2" style={{ background: `rgba(15,154,68,${0.08 + 0.8 * n / slotMax})`, color: n / slotMax > 0.5 ? '#fff' : '#111' }}>{Number(h)}時<br /><b>{n}</b></div>; })}
                                 </div>
-                            ) : <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">該当なし。みなさん定期的に注文されています。</p>}
-                        </div>
+                            </div>
 
-                        <div className="bg-white p-4 rounded-xl shadow-sm border border-yellow-200">
-                            <h3 className="font-bold text-gray-800 text-sm mb-3 flex items-center gap-2"><Icons.Award className="w-4 h-4 text-yellow-500"/> LINE優良顧客ランキング</h3>
-                            <p className="text-[10px] text-gray-500 mb-3">※店頭販売分はここには含まれません。リストをタップすると「購入カルテ・請求明細書」が開きます。</p>
-                            <div className="space-y-2">
-                                {topCustomers.length > 0 ? (
-                                    <>
-                                        {topCustomers.slice(0, 5).map((customer, idx) => (
-                                            <div key={customer.userId || idx} role="button" tabIndex={0} onClick={() => setShowCustomerModal(customer)} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-100 active:bg-gray-200 transition-colors">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-gray-300 text-gray-800' : idx === 2 ? 'bg-orange-300 text-orange-900' : 'bg-gray-200 text-gray-600'}`}>{idx + 1}</div>
-                                                    <div><div className="font-bold text-sm text-gray-800">{customer.userName} 様</div><div className="text-[10px] text-gray-500">注文回数: {customer.orderCount}回</div></div>
-                                                </div>
-                                                <div className="font-bold text-nanairo-dark">¥{Number(customer.totalSpend || 0).toLocaleString()}</div>
+                            {/* お客様 */}
+                            <div className={`${card} p-4`}>
+                                <div className="flex items-center justify-between"><div className="text-sm font-bold text-gray-700">お客様（LINE）</div><button type="button" onClick={() => { setActiveTab('customers'); setSelectedCustomerKey(null); }} className="text-[11px] font-bold text-nanairo-dark">すべて見る ›</button></div>
+                                <div className="grid grid-cols-4 gap-1 text-center mt-2">
+                                    {[['登録', cu.total || 0], ['期間中の利用', cu.active || 0], ['新規', cu.newCount || 0], ['リピート率', `${cu.repeatRate || 0}%`]].map(([l, v]) => <div key={l} className="rounded-lg bg-gray-50 py-2"><div className="text-[10px] text-gray-500">{l}</div><b>{v}</b></div>)}
+                                </div>
+                                <div className="text-xs font-bold text-gray-500 mt-3 mb-1">よく買ってくださる方（累計）</div>
+                                <div className="text-sm divide-y divide-gray-100">
+                                    {topCust.map((c, i) => <button key={c.key} type="button" onClick={() => { setActiveTab('customers'); setSelectedCustomerKey(c.key); }} className="w-full flex justify-between py-1.5 text-left"><span className="truncate">{i + 1}. {c.name}</span><span className="text-xs text-gray-500 whitespace-nowrap">{c.count}回・<b className="text-gray-900">{yen(c.spend)}</b></span></button>)}
+                                    {topCust.length === 0 && <div className="text-xs text-gray-400 py-2">まだ注文がありません</div>}
+                                </div>
+                                {followUp.length > 0 && <>
+                                    <div className="text-xs font-bold text-blue-700 mt-3 mb-1">声かけ候補（しばらく注文なし）</div>
+                                    <div className="text-sm divide-y divide-gray-100">
+                                        {followUp.slice(0, 5).map(f => <div key={f.id} className="flex justify-between py-1.5"><span className="truncate">{f.name}</span><span className="text-xs text-gray-500 whitespace-nowrap">最終 {shortDate(f.last)}{f.avgGapDays ? `・いつも ${f.avgGapDays}日ごと` : ''}</span></div>)}
+                                    </div>
+                                </>}
+                            </div>
+
+                            {/* 委託・請求 */}
+                            <div className={`${card} p-4`}>
+                                <div className="text-sm font-bold text-gray-700 mb-2">委託先別（精算済み）</div>
+                                {agencyRates.length === 0 ? <div className="text-xs text-gray-400">この期間の委託はありません</div> : (
+                                    <table className="w-full text-sm"><thead className="border-b border-gray-200"><tr className="text-[11px] text-gray-500"><th className="text-left py-1.5">委託先</th><th className="text-right">納品</th><th className="text-right">ロス</th><th className="text-right">ロス率</th></tr></thead>
+                                        <tbody className="divide-y divide-gray-100">{agencyRates.map(a => <tr key={a.name}><td className="py-1.5">{a.name}</td><td className="text-right">{a.deliveryQty}</td><td className="text-right">{a.lossQty}</td><td className={`text-right ${a.lossRate >= 30 ? 'text-red-500 font-bold' : ''}`}>{a.lossRate}%</td></tr>)}</tbody></table>
+                                )}
+                                <div className="text-sm font-bold text-gray-700 mt-4 mb-2">🧾 月締め請求（お渡し済み）</div>
+                                {billing.length === 0 ? <div className="text-xs text-gray-400">この期間の請求対象はありません</div> : (
+                                    <div className="text-sm divide-y divide-gray-100">
+                                        {billing.map(({ c, list, amount, unpaid }) => (
+                                            <div key={c.key} className="flex items-center justify-between py-2 gap-2">
+                                                <div className="min-w-0"><b className="truncate block">{c.name}</b><div className="text-[10px] text-gray-500">{list.length}件{unpaid ? `・未集金 ${unpaid}件` : '・集金済'}</div></div>
+                                                <div className="flex items-center gap-2 shrink-0"><b>{yen(amount)}</b><button type="button" onClick={() => openCustomerReport(c, list)} className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${unpaid ? 'bg-nanairo-dark text-white' : 'border border-gray-300 text-gray-600'}`}>請求書</button></div>
                                             </div>
                                         ))}
-                                        {topCustomers.length > 5 && (
-                                            <button type="button" onClick={() => setShowAllCustomersModal(true)} className="w-full text-center text-xs font-bold text-yellow-600 py-2 bg-yellow-50 rounded-lg active:bg-yellow-100 mt-2">すべて見る ({topCustomers.length}件)</button>
-                                        )}
-                                    </>
-                                ) : <p className="text-sm text-gray-500 text-center py-4">データがありません</p>}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
