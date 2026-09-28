@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>マイクロハーブ</title>
-    <link rel="apple-touch-icon" href="icon.png">
+    <link rel="apple-touch-icon" href="images/logo.png">
+    <link rel="icon" type="image/png" href="images/logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
     
     <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
@@ -17,8 +20,10 @@
             theme: {
                 extend: {
                     colors: {
-                        'nanairo': { light: '#e6f4ea', DEFAULT: '#4ade80', dark: '#16a34a' },
-                        'nanairo-accent': '#f97316',
+                        // ★ロゴ（カメレオン）の色：輪郭の濃い緑・体の黄緑・生成りの背景
+                        'nanairo': { light: '#EEF5E1', DEFAULT: '#8DC63F', dark: '#0F9A44' },
+                        'nanairo-accent': '#F7931E',
+                        'cream': '#FAF6EC',
                     }
                 }
             }
@@ -28,11 +33,11 @@
         ::-webkit-scrollbar { display: none; }
         body {
             -ms-overflow-style: none; scrollbar-width: none;
-            background-color: #f3f4f6; font-family: -apple-system, sans-serif;
+            background-color: #FAF6EC; font-family: "Zen Maru Gothic", -apple-system, sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
         .app-container {
-            max-width: 430px; margin: 0 auto; background-color: white;
+            max-width: 430px; margin: 0 auto; background-color: #FAF6EC;
             min-height: 100vh; position: relative; display: flex; flex-direction: column;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
@@ -45,6 +50,8 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        /* ロゴのお腹と同じ虹色の線 */
+        .rainbow { height: 4px; background: linear-gradient(90deg,#E8412F,#F7931E,#FDD835,#4CB848,#00AEEF,#0F75BC,#A0569F); }
     </style>
 </head>
 <body>
@@ -86,6 +93,21 @@
         // ★画面に出さない商品（スプレッドシートには残したまま、販売だけ止める）
         //   admin.html の HIDDEN_PRODUCTS も同じにしてください
         const HIDDEN_PRODUCTS = ["なないろ菜", "レッドソレル"];
+
+        // ★商品の一言説明（商品一覧に表示）
+        const PRODUCT_DESC = {
+            "アマランサス": "鮮やかな赤紫・やさしい味",
+            "デトロイト": "赤い茎がサラダを華やかに",
+            "にんじん": "ほのかなにんじんの香り",
+            "ハーブミックス": "いろいろな風味を少しずつ",
+            "ひまわり": "シャキッと食感・ナッツの風味",
+            "ペッパークレス": "ピリッとした辛み",
+            "マスタード": "ツンとくる辛み・肉料理に",
+            "レッドケール": "クセが少なく彩りに",
+            "レッドラディッシュ": "大根の辛み・彩りに",
+            "ロケット": "ごまの香り・ピリッと辛い",
+            "青じそ": "爽やかな香り"
+        };
 
         // ★配送ルール（GAS側の DELIVERY と同じ値にしてください）
         const DELIVERY = {
@@ -493,31 +515,32 @@
             return (
                 <div className="app-container" style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom))' }}>
                     
-                    <header className="sticky top-0 z-20 bg-nanairo-light px-4 py-3 flex justify-between items-center shadow-sm">
-                        <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white font-bold text-xs">LINE</div>
-                            <span className="font-bold text-gray-800 text-sm">マイクロハーブ</span>
+                    <header className="sticky top-0 z-20 bg-cream">
+                        <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+                            <img src="images/logo.png" alt="" className="w-10 h-10 object-contain" />
+                            <div>
+                                <div className="font-black text-[17px] leading-none text-nanairo-dark">マイクロハーブ</div>
+                                <div className="text-[10px] text-stone-500 mt-0.5">つみたてを、そのままお届け</div>
+                            </div>
                         </div>
+                        <div className="rainbow"></div>
                     </header>
 
-                    <main className="flex-1 overflow-y-auto bg-white px-4 py-4 space-y-4">
+                    <main className="flex-1 overflow-y-auto bg-cream px-4 py-4 space-y-4">
                         {activeTab === 'home' ? (
                             <>
-                                <div className="flex justify-between items-end border-b border-gray-200 pb-2 mb-2">
-                                    <h2 className="text-lg font-bold text-gray-800">{customer ? customer.fullName : userName}様</h2>
-                                    <span className="text-xs text-gray-500 flex items-center gap-1"><Icons.Truck className="w-3.5 h-3.5 text-nanairo-dark" />店頭受取・配送OK</span>
-                                </div>
+                                <p className="text-stone-700 text-[15px] font-bold">{customer ? customer.fullName : userName}さん、こんにちは🌱</p>
 
-                                <div className="bg-nanairo-light/60 border border-green-200 rounded-xl p-3 flex gap-2.5 items-start">
-                                    <Icons.Truck className="w-5 h-5 text-nanairo-dark shrink-0 mt-0.5" />
-                                    <div className="text-[11px] text-gray-700 leading-relaxed">
-                                        <p className="font-bold text-gray-800 text-xs mb-0.5">庄内一円に配送できます</p>
-                                        <p>毎週{DELIVERY.days.map(d => WEEK[d]).join('・')}曜 {DELIVERY.time.replace('-', '〜')}／<span className="font-bold text-nanairo-dark">¥{DELIVERY.freeThreshold.toLocaleString()}以上で送料無料</span>（未満は¥{DELIVERY.fee}）</p>
+                                <div className="bg-nanairo-light rounded-2xl p-3 flex gap-3 items-center">
+                                    <div className="w-9 h-9 rounded-full bg-nanairo flex items-center justify-center text-white shrink-0"><Icons.Truck className="w-5 h-5" /></div>
+                                    <div className="text-[11px] text-stone-700 leading-relaxed">
+                                        <p className="font-bold text-nanairo-dark text-[13px]">庄内一円にお届けします</p>
+                                        <p>毎週{DELIVERY.days.map(d => WEEK[d]).join('・')} {DELIVERY.time.replace('-', '〜')}／<span className="font-bold">¥{DELIVERY.freeThreshold.toLocaleString()}以上で送料無料</span>（未満は¥{DELIVERY.fee}）</p>
                                     </div>
                                 </div>
 
                                 <section>
-                                    <h3 className="font-bold text-gray-800 mb-3">商品一覧</h3>
+                                    <h3 className="font-black text-stone-800 mb-3">きょうの収穫</h3>
                                     
                                     {isLoadingData ? (
                                         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
@@ -532,41 +555,32 @@
                                                 const isSoldOut = product.stock <= 0;
 
                                                 return (
-                                                    <div key={product.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col relative">
-                                                        {isSoldOut && (
-                                                            <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-10 flex items-center justify-center">
-                                                                <span className="bg-gray-800 text-white font-bold px-3 py-1.5 rounded text-sm tracking-widest -rotate-12 shadow-lg">SOLD OUT</span>
-                                                            </div>
-                                                        )}
-                                                        <div className="relative h-28 bg-gray-100">
+                                                    <div key={product.id} className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-[0_2px_0_rgba(15,154,68,.12)] flex flex-col relative">
+                                                        <div className="relative h-28 bg-stone-100">
                                                             {product.image ? (
-                                                                <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                                                                <img src={product.image} alt={product.name} loading="lazy" decoding="async" className={`w-full h-full object-cover ${isSoldOut ? 'grayscale opacity-60' : ''}`} />
                                                             ) : (
                                                                 <div className="w-full h-full flex items-center justify-center bg-nanairo-light text-nanairo-dark font-bold text-sm px-2 text-center">{product.name}</div>
                                                             )}
+                                                            {isSoldOut && <span className="absolute top-2 left-2 text-[10px] font-bold bg-stone-700 text-white px-2 py-0.5 rounded-full">また入荷します</span>}
                                                         </div>
-                                                        <div className="p-2 flex-1 flex flex-col">
-                                                            <h4 className="text-sm font-bold text-gray-800 leading-tight mb-1 line-clamp-2">{product.name}</h4>
-                                                            
-                                                            <div className="mb-2">
-                                                                <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">内容量: {product.weight}</span>
-                                                            </div>
-
-                                                            <div className="flex justify-between items-baseline mt-auto">
-                                                                <span className="font-bold text-gray-900">¥{product.price}</span>
-                                                                <span className="text-xs text-gray-500">/{product.unit}</span>
-                                                            </div>
-                                                            <div className="text-xs mt-1 font-medium flex justify-between">
-                                                                <span>在庫: <span className={isSoldOut ? 'text-red-500 font-bold' : isLowStock ? 'text-nanairo-accent' : 'text-gray-600'}>{isSoldOut ? 'なし' : product.stock + 'P'}</span></span>
+                                                        <div className={`p-2.5 flex-1 flex flex-col ${isSoldOut ? 'opacity-60' : ''}`}>
+                                                            <h4 className="text-[14px] font-bold text-stone-800 leading-tight line-clamp-2">{product.name}</h4>
+                                                            {PRODUCT_DESC[product.name] && <p className="text-[10px] text-stone-500 mt-0.5 leading-snug">{PRODUCT_DESC[product.name]}</p>}
+                                                            <div className="flex justify-between items-end mt-auto pt-1.5">
+                                                                <span className="font-black text-stone-900">¥{product.price}</span>
+                                                                {isSoldOut ? <span className="text-[10px] text-stone-500">売り切れ</span>
+                                                                    : isLowStock ? <span className="text-[10px] font-bold text-nanairo-accent">残りわずか {product.stock}</span>
+                                                                    : <span className="text-[10px] text-stone-500">{product.weight}／残り{product.stock}</span>}
                                                             </div>
                                                             <div className="mt-2 h-8">
                                                                 {qty === 0 ? (
-                                                                    <button onClick={() => setQuantity(product.id, 1)} disabled={isSoldOut} className={`w-full h-full rounded-md text-sm font-bold transition-colors ${isSoldOut ? 'bg-gray-200 text-gray-400' : isLowStock ? 'bg-orange-100 text-nanairo-accent' : 'bg-nanairo-dark text-white'}`}>カートに追加</button>
+                                                                    <button onClick={() => setQuantity(product.id, 1)} disabled={isSoldOut} className={`w-full h-full rounded-full text-[13px] font-bold transition-colors ${isSoldOut ? 'bg-stone-200 text-stone-400' : 'bg-nanairo-dark text-white active:opacity-80'}`}>{isSoldOut ? '売り切れ' : 'カートに入れる'}</button>
                                                                 ) : (
-                                                                    <div className="flex items-center justify-between bg-gray-100 rounded-md h-full px-1 z-20 relative">
-                                                                        <button onClick={() => updateQuantity(product.id, -1)} className="w-8 h-full flex items-center justify-center text-gray-600 active:bg-gray-200 rounded"><Icons.Minus className="w-4 h-4" /></button>
-                                                                        <span className="font-bold text-sm w-6 text-center">{qty}</span>
-                                                                        <button onClick={() => updateQuantity(product.id, 1)} disabled={qty >= product.stock} className={`w-8 h-full flex items-center justify-center rounded ${qty >= product.stock ? 'text-gray-300' : 'text-gray-600 active:bg-gray-200'}`}><Icons.Plus className="w-4 h-4" /></button>
+                                                                    <div className="flex items-center justify-between bg-nanairo-light rounded-full h-full px-0.5">
+                                                                        <button onClick={() => updateQuantity(product.id, -1)} className="w-7 h-7 rounded-full bg-white flex items-center justify-center text-nanairo-dark"><Icons.Minus className="w-4 h-4" /></button>
+                                                                        <span className="font-bold text-sm text-stone-800">{qty}</span>
+                                                                        <button onClick={() => updateQuantity(product.id, 1)} disabled={qty >= product.stock} className={`w-7 h-7 rounded-full flex items-center justify-center text-white ${qty >= product.stock ? 'bg-stone-300' : 'bg-nanairo-dark'}`}><Icons.Plus className="w-4 h-4" /></button>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -602,7 +616,7 @@
                                 )}
                                 <div className="space-y-3">
                                     {pastOrders.length === 0 ? (
-                                        <p className="text-gray-500 text-center py-10 bg-gray-50 rounded-xl">履歴はありません</p>
+                                        <div className="text-center py-8 bg-white rounded-2xl border border-stone-200"><img src="images/logo.png" alt="" className="w-20 h-20 object-contain mx-auto opacity-80" /><p className="text-stone-500 text-sm mt-2">まだご注文はありません</p></div>
                                     ) : pastOrders.map(order => {
                                         const isCancelled = order.status === 'キャンセル';
                                         const isCompleted = order.status === '受渡済';
@@ -663,19 +677,19 @@
 
                     {cartSummary.totalItems > 0 && !showConfirm && !showComplete && (
                         <div className="fixed left-0 right-0 mx-auto w-full max-w-[430px] px-4 py-3 z-30 animate-slide-up box-border" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom))' }}>
-                            <button onClick={() => setShowConfirm(true)} className="w-full bg-[#759fbf] text-white rounded-xl py-3 px-4 flex justify-between items-center font-bold shadow-lg active:bg-[#5c809a] transition-colors">
-                                <div className="flex items-center gap-2"><Icons.ShoppingCart className="w-5 h-5" /><span>カートを確認する</span></div>
-                                <div className="flex items-center gap-3"><span className="text-sm font-normal">{cartSummary.totalItems}点</span><span className="text-lg">¥{cartSummary.totalPrice.toLocaleString()}</span></div>
+                            <button onClick={() => setShowConfirm(true)} className="w-full bg-nanairo-dark text-white rounded-full py-3 px-5 flex justify-between items-center font-bold shadow-lg active:opacity-90 transition-opacity">
+                                <div className="flex items-center gap-2"><Icons.ShoppingCart className="w-5 h-5" /><span>カートを見る</span></div>
+                                <div className="flex items-center gap-2"><span className="text-sm font-normal">{cartSummary.totalItems}点</span><span className="text-lg font-black">¥{cartSummary.totalPrice.toLocaleString()}</span></div>
                             </button>
                         </div>
                     )}
 
-                    <div className="fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[430px] bg-white border-t border-gray-200 flex z-20 box-border" style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}>
-                        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'home' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
+                    <div className="fixed bottom-0 left-0 right-0 mx-auto w-full max-w-[430px] bg-white border-t border-stone-200 flex z-20 box-border" style={{ height: 'calc(56px + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+                        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'home' ? 'text-nanairo-dark' : 'text-stone-400'}`}>
                             <Icons.Store className="w-5 h-5" />
                             <span className="text-[10px] font-bold">ショップ</span>
                         </button>
-                        <button onClick={() => setActiveTab('history')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'history' ? 'text-nanairo-dark' : 'text-gray-400'}`}>
+                        <button onClick={() => setActiveTab('history')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'history' ? 'text-nanairo-dark' : 'text-stone-400'}`}>
                             <Icons.History className="w-5 h-5" />
                             <span className="text-[10px] font-bold">履歴・キャンセル</span>
                         </button>
@@ -826,7 +840,7 @@
                                     <button 
                                         onClick={handleOrderSubmit} 
                                         disabled={!!formProblem || isSubmitting} 
-                                        className={`w-full rounded-xl py-3 font-bold text-base shadow-lg transition-colors flex justify-center items-center gap-2
+                                        className={`w-full rounded-full py-3.5 font-bold text-base shadow-lg transition-colors flex justify-center items-center gap-2
                                             ${formProblem ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 
                                               isSubmitting ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-nanairo-dark text-white active:bg-green-700'}`}
                                     >
@@ -903,13 +917,14 @@
                     )}
 
                     {showComplete && (
-                        <div className="fixed inset-0 z-50 flex justify-center bg-gray-50">
-                            <div className="w-full max-w-[430px] bg-white h-full flex flex-col items-center justify-center p-6 text-center pb-safe">
-                                <div className="w-20 h-20 bg-green-100 text-nanairo-dark rounded-full flex items-center justify-center mb-6"><Icons.Check className="w-10 h-10" /></div>
-                                <h2 className="text-2xl font-bold text-gray-900 mb-2">ご注文完了しました</h2>
-                                <p className="text-gray-600 mb-4 text-sm">公式LINEへ内容を通知しました。</p>
+                        <div className="fixed inset-0 z-50 flex justify-center bg-cream">
+                            <div className="w-full max-w-[430px] bg-cream h-full flex flex-col items-center justify-center p-6 text-center pb-safe">
+                                <img src="images/logo.png" alt="" className="w-40 h-40 object-contain -mb-2" />
+                                <div className="rainbow w-24 rounded-full mb-5"></div>
+                                <h2 className="text-2xl font-black text-nanairo-dark mb-2">ご注文ありがとう！</h2>
+                                <p className="text-stone-600 mb-4 text-sm">LINEに内容をお送りしました。</p>
                                 {lastOrder && (
-                                    <div className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-left text-sm space-y-1.5">
+                                    <div className="w-full bg-white border border-stone-200 rounded-2xl p-4 text-left text-sm space-y-1.5">
                                         <div className="flex items-center gap-1.5 font-bold text-gray-800">
                                             {lastOrder.method === METHOD_DELIVERY ? <><Icons.Truck className="w-4 h-4 text-nanairo-dark" />配送：{formatJpDate(lastOrder.date)} {lastOrder.time.replace('-', '〜')}頃</> : <><Icons.Store className="w-4 h-4 text-nanairo-dark" />ご来店：{formatJpDate(lastOrder.date)} {lastOrder.time.replace('-', '〜')}</>}
                                         </div>
@@ -920,7 +935,7 @@
                                 <p className="text-gray-500 mt-4 text-xs leading-relaxed">
                                     {lastOrder && lastOrder.method === METHOD_DELIVERY ? <>配送日時の調整などで、公式LINEから<br/>個別にご連絡する場合があります。</> : 'ご来店をお待ちしております。'}
                                 </p>
-                                <button onClick={closeApp} className="w-full bg-gray-800 text-white rounded-xl py-4 font-bold text-lg active:bg-gray-900 mt-8">トーク画面に戻る</button>
+                                <button onClick={closeApp} className="w-full bg-nanairo-dark text-white rounded-full py-3.5 font-bold text-lg active:opacity-90 mt-8">トーク画面に戻る</button>
                             </div>
                         </div>
                     )}
