@@ -230,6 +230,25 @@
                 try { return (window.liff && liff.isLoggedIn()) ? liff.getIDToken() : null; } catch (e) { return null; }
             };
 
+            // ★この端末に保存がないとき（機種変更など）、前回のご注文からお届け先・店舗名を入れておく
+            //   ※住所・電話番号はLINEの本人確認が取れたときだけサーバーから返ってきます
+            const fillFromLastOrder = (orders) => {
+                const lastDelivery = orders.find(o => o.deliveryMethod === METHOD_DELIVERY && o.address);
+                if (lastDelivery) {
+                    const c = DELIVERY.areas.find(a => lastDelivery.address.startsWith(a));
+                    if (c) {
+                        setAddressDetail(prev => {
+                            if (prev) return prev;
+                            setCity(c);
+                            return lastDelivery.address.slice(c.length);
+                        });
+                    }
+                    if (lastDelivery.phone) setPhone(prev => prev || lastDelivery.phone);
+                }
+                const lastStore = orders.find(o => o.storeName);
+                if (lastStore) setStoreName(prev => prev || lastStore.storeName);
+            };
+
             const fetchUserOrders = (uid) => {
                 const idToken = getIdToken();
                 const fallbackId = uid || userId;
@@ -244,7 +263,8 @@
                     .then(data => {
                         if (Array.isArray(data)) {
                             setPastOrders(data);
-                            localStorage.setItem('nanairo_history', JSON.stringify(data));
+                            fillFromLastOrder(data);
+                            localStorage.setItem('nanairo_history', JSON.stringify(data.map(({ address, phone, ...rest }) => rest)));
                         }
                     })
                     .catch(err => console.error("履歴取得エラー", err))
