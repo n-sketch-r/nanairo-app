@@ -140,6 +140,12 @@
 
             // メッセージ表示用
             const [message, setMessage] = useState('');
+            const toastTimer = React.useRef(null);
+            const showToast = (text, sub, undo) => {
+                clearTimeout(toastTimer.current);
+                setToast({ text, sub, undo, id: Date.now() });
+                toastTimer.current = setTimeout(() => setToast(null), 7000);
+            };
             const showMessage = (text, duration = 4000) => {
                 setMessage(text);
                 setTimeout(() => setMessage(''), duration);
@@ -181,6 +187,14 @@
             const [productEdit, setProductEdit] = useState(null);
             const [isSavingAdmin, setIsSavingAdmin] = useState(false);
             const [memoDrafts, setMemoDrafts] = useState({});
+            const [toast, setToast] = useState(null);             // 下に出る「取り消す」付きのお知らせ
+            const [logSheet, setLogSheet] = useState(null);       // 最近の記録をタップしたとき
+            const [confirmSheet, setConfirmSheet] = useState(null); // 取り消しなどの確認（共通）
+            const [confirmBusy, setConfirmBusy] = useState(false);
+            const [settleSheet, setSettleSheet] = useState(null); // 委託：お店ごとにまとめて精算
+            const [deliveryDone, setDeliveryDone] = useState(null); // 委託：納品の完了画面
+            const [batchMenu, setBatchMenu] = useState(null);     // 委託：履歴の「⋯」メニュー
+            const [showPass, setShowPass] = useState(false);
             
             // モーダル・キャンセル関連
             const [showBulkLossModal, setShowBulkLossModal] = useState(false);
@@ -313,10 +327,10 @@
                 if (!selectedProductId) return showMessage("商品を選択してください");
                 setIsSubmitting(true);
                 try {
-                    await postAdmin({ action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo });
+                    const res = await postAdmin({ action: "stockUpdate", productId: selectedProductId, type: type, amount: amount, memo: stockMemo });
                     const actionName = type === 'add' ? '収穫' : type === 'sale' ? '店頭販売' : 'ロス';
                     const pName = (products.find(x => x.id === selectedProductId) || {}).name || '';
-                    showMessage(`${pName}：${actionName} ${amount} を記録しました`);
+                    showToast(`${pName}：${actionName} ${type === 'add' ? '+' : '−'}${amount} を記録しました`, null, res.logRow ? () => undoLogs([res.logRow]) : null);
                     setStockSheetOpen(false);
                     fetchData(viewStartMonth, viewEndMonth); setAmount(1); setStockMemo(''); 
                 } catch(error) { showMessage("記録できませんでした: " + error.message, 6000); } 
@@ -326,8 +340,10 @@
             const handleBulkLoss = async () => {
                 setIsBulkSubmitting(true);
                 try {
-                    await postAdmin({ action: "bulkLoss" });
-                    showMessage(`現在在庫がある全商品を一括でロス(破棄)にしました！`);
+                    const res = await postAdmin({ action: "bulkLoss" });
+                    const rows = res.logRows || [];
+                    const n = rows.length || allProducts.filter(p => p.stock > 0).length; // 古いGASでも件数を正しく出す
+                    showToast(`${n}商品をロスにしました`, '残す分は「まとめて入力」で収穫として戻せます', rows.length ? () => undoLogs(rows) : null);
                     fetchData(viewStartMonth, viewEndMonth);
                 } catch(error) { showMessage("一括ロスを記録できませんでした: " + error.message, 6000); } 
                 finally { setIsBulkSubmitting(false); setShowBulkLossModal(false); }
@@ -429,7 +445,6 @@
 
                 try {
                     await postAdmin({ action: "agencyDelivery", agencyId: agency.id, agencyName: agency.name, items: itemsToDeliver, deliveryDate: deliveryDate });
-                    showMessage(`${agency.name} への納品を記録しました！`);
                     
                     const invoiceData = {
                         id: `preview-${Date.now()}`, userName: agency.name, pickupDate: toWareki(deliveryDate), isAgency: true,
@@ -443,7 +458,8 @@
                         })
                     };
                     setDeliveryCart({}); fetchData(viewStartMonth, viewEndMonth);
-                    setPrintOrders([invoiceData]); setPrintType('agency_invoice');
+                    setShowDeliveryForm(false);
+                    setDeliveryDone({ agency, items: itemsToDeliver, invoiceData, date: deliveryDate });
                 } catch (error) { showMessage("納品を記録できませんでした: " + error.message, 6000); } 
                 finally { setIsSubmittingDelivery(false); }
             };
@@ -484,14 +500,20 @@
 
             if (!adminKey) {
                 return (
-                    <div className="flex items-center justify-center min-h-screen bg-gray-50 p-6">
-                        <form onSubmit={handleLogin} className="w-full max-w-[340px] bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-                            <div className="flex items-center gap-2 mb-1"><div className="w-8 h-8 bg-nanairo-dark rounded-full flex items-center justify-center text-white"><Icons.ClipboardList className="w-4 h-4" /></div><h1 className="font-bold text-gray-800">なないろ菜 管理画面</h1></div>
-                            <p className="text-xs text-gray-500 mb-5">スタッフ用のパスワードを入力してください。この端末では次回から入力不要になります。</p>
-                            <label htmlFor="admin-pass" className="block text-xs font-bold text-gray-600 mb-1">パスワード</label>
-                            <input id="admin-pass" type="password" autoComplete="current-password" value={loginInput} onChange={e => setLoginInput(e.target.value)} className="block w-full border border-gray-300 rounded-lg p-3 text-base bg-gray-50 focus:ring-2 focus:ring-nanairo-dark outline-none mb-3" autoFocus />
-                            {loginError && <p role="alert" className="text-xs font-bold text-red-600 mb-3">{loginError}</p>}
-                            <button type="submit" disabled={!loginInput || isLoggingIn} className={`w-full rounded-xl py-3 font-bold text-white ${!loginInput || isLoggingIn ? 'bg-gray-300' : 'bg-nanairo-dark active:bg-green-700'}`}>{isLoggingIn ? '確認中…' : 'ログイン'}</button>
+                    <div className="flex items-center justify-center min-h-screen p-6" style={{ background: '#FAF6EC' }}>
+                        <form onSubmit={handleLogin} className="w-full max-w-[340px] flex flex-col items-center">
+                            <img src="images/logo.png" alt="" className="w-28 h-28 object-contain" />
+                            <div className="rainbow w-20 rounded-full mt-1 mb-4"></div>
+                            <h1 className="text-xl font-bold text-nanairo-dark">マイクロハーブ 管理</h1>
+                            <p className="text-xs text-gray-500 mt-1 mb-5">スタッフ用のパスワードを入れてください</p>
+                            <label htmlFor="admin-pass" className="sr-only">パスワード</label>
+                            <div className="w-full flex items-center bg-white border border-gray-300 rounded-xl focus-within:ring-2 focus-within:ring-nanairo-dark">
+                                <input id="admin-pass" type={showPass ? 'text' : 'password'} autoComplete="current-password" value={loginInput} onChange={e => setLoginInput(e.target.value)} placeholder="パスワード" className="flex-1 min-w-0 px-4 py-3 text-base bg-transparent outline-none" autoFocus />
+                                <button type="button" onClick={() => setShowPass(!showPass)} className="px-3 text-gray-400 text-lg" aria-label={showPass ? 'パスワードを隠す' : 'パスワードを表示'}>{showPass ? '🙈' : '👁'}</button>
+                            </div>
+                            {loginError && <p role="alert" className="w-full text-xs font-bold text-red-600 mt-2">{loginError}</p>}
+                            <button type="submit" disabled={!loginInput || isLoggingIn} className={`w-full mt-3 rounded-xl py-3.5 font-bold text-white ${!loginInput || isLoggingIn ? 'bg-gray-300' : 'bg-nanairo-dark'}`}>{isLoggingIn ? '確認中…' : 'ログイン'}</button>
+                            <p className="text-[11px] text-gray-400 mt-3">この端末では次回から入力不要です</p>
                         </form>
                     </div>
                 );
@@ -516,6 +538,13 @@
 
             const renderPrintView = () => {
                 if(printOrders.length === 0) return null;
+                const printBar = (title, sub) => (
+                    <div className="bg-white px-3 py-2 flex items-center gap-2 shadow-sm">
+                        <button type="button" onClick={() => setPrintOrders([])} className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0" aria-label="閉じる"><Icons.X className="w-5 h-5" /></button>
+                        <div className="flex-1 min-w-0"><b className="text-sm text-gray-900">{title}</b>{sub && <div className="text-[11px] text-gray-500 truncate">{sub}</div>}</div>
+                        <button type="button" onClick={executePrint} className="px-4 py-2.5 rounded-xl bg-nanairo-dark text-white text-sm font-bold flex items-center gap-1.5 shrink-0"><Icons.Printer className="w-4 h-4" />印刷・PDF保存</button>
+                    </div>
+                );
                 const todayText = toWareki(new Date(Date.now() + 9 * 3600 * 1000).toISOString().split('T')[0]);
 
                 if (printType === 'monthly_report') {
@@ -528,12 +557,9 @@
                     }, 0);
                     return (
                         <div className="fixed inset-0 z-[100] bg-gray-100 flex flex-col print-area h-screen overflow-y-auto">
-                            <div className="no-print bg-white shadow-md p-4 flex flex-col items-stretch gap-3 sticky top-0 z-10 border-b border-gray-200">
-                                <div className="flex justify-between items-center w-full">
-                                    <button onClick={() => setPrintOrders([])} className="text-gray-500 hover:text-gray-800 font-bold flex items-center gap-1"><Icons.X className="w-5 h-5"/> 閉じる</button>
-                                    <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-nanairo-dark text-white active:opacity-90"><Icons.Printer className="w-5 h-5"/> 印刷・PDF保存</button>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-4 bg-gray-50 p-3 rounded-lg border border-gray-200 w-full text-sm">
+                            <div className="no-print sticky top-0 z-10">
+                                {printBar('請求明細書', printName)}
+                                <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-200 p-3 flex flex-wrap items-center gap-4 text-sm">
                                     <div className="flex items-center gap-2">
                                         <label className="font-bold text-gray-600 whitespace-nowrap">宛名:</label>
                                         <input type="text" value={printName} onChange={e => setPrintName(e.target.value)} className="border border-gray-300 rounded p-1 w-32 font-bold bg-white focus:outline-none" />
@@ -583,10 +609,7 @@
                 if (printType === 'agency_invoice') {
                     return (
                         <div className="fixed inset-0 z-[100] bg-gray-100 flex flex-col print-area h-screen overflow-y-auto">
-                            <div className="no-print bg-white shadow-md p-4 flex flex-col sm:flex-row justify-between items-center gap-3 sticky top-0 z-10 border-b border-gray-200">
-                                <button onClick={() => setPrintOrders([])} className="text-gray-500 hover:text-gray-800 font-bold flex items-center gap-1"><Icons.X className="w-5 h-5"/> 閉じる</button>
-                                <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-agency text-white active:bg-orange-600"><Icons.Printer className="w-5 h-5"/> 印刷・PDF保存</button>
-                            </div>
+                            <div className="no-print sticky top-0 z-10">{printBar(String(printOrders[0].docTitle || '納 品 書').replace(/ /g, ''), printOrders[0].userName)}</div>
                             <div className="p-4 sm:p-8 mt-4 overflow-x-auto flex-1">
                                 {printOrders.map((order) => {
                                     let totalBillingExTax = 0; order.itemsList.forEach(i => totalBillingExTax += (i.lineExTax != null ? Number(i.lineExTax) : Number(i.billingExTax || 0) * Number(i.qty || 0)));
@@ -630,15 +653,14 @@
 
                 return (
                     <div className="fixed inset-0 z-[100] bg-gray-100 flex flex-col print-area h-screen overflow-y-auto">
-                        <div className="no-print bg-white shadow-md p-4 flex flex-col sm:flex-row justify-between items-center gap-3 sticky top-0 z-10 border-b border-gray-200">
-                            <button onClick={() => setPrintOrders([])} className="text-gray-500 hover:text-gray-800 font-bold flex items-center gap-1"><Icons.X className="w-5 h-5"/> 閉じる</button>
+                        <div className="no-print sticky top-0 z-10">
+                            {printBar(printType === 'invoice' ? '納品書' : '領収書', printOrders.length === 1 ? printName : `${printOrders.length}件まとめて`)}
                             {printOrders.length === 1 && (
-                                <div className="flex items-center gap-2 flex-1 max-w-sm">
-                                    <label className="text-sm font-bold text-gray-600 whitespace-nowrap">宛名編集:</label>
-                                    <input type="text" value={printName} onChange={e => setPrintName(e.target.value)} className="border border-gray-300 rounded p-1.5 w-full text-sm font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                <div className="mx-3 mt-3 bg-white rounded-2xl border border-gray-200 p-3 text-sm flex items-center gap-2">
+                                    <label className="text-[11px] font-bold text-gray-500 whitespace-nowrap">宛名</label>
+                                    <input type="text" value={printName} onChange={e => setPrintName(e.target.value)} className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 font-bold bg-white" />
                                 </div>
                             )}
-                            <button onClick={executePrint} className="px-5 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 bg-nanairo-dark text-white active:opacity-90"><Icons.Printer className="w-5 h-5"/> 印刷を実行</button>
                         </div>
                         <div className="p-4 sm:p-8 mt-4 overflow-x-auto flex-1">
                             {printOrders.map((order, index) => {
@@ -733,11 +755,17 @@
             const customerOf = (o) => customerList.find(c => c.key === custKey(o));
 
             // 状態を直接変える（詳細の①②③、まとめて準備完了で使う）
-            const setOrderStatus = async (order, newStatus) => {
+            const setOrderStatus = async (order, newStatus, opts = {}) => {
                 if (!order || order.status === newStatus || order.status === 'キャンセル') return;
                 const prev = order.status;
                 setOrders(p => p.map(o => o.id === order.id ? { ...o, status: newStatus } : o));
-                try { await postAdmin({ action: "statusUpdate", orderId: order.id, newStatus }); }
+                try {
+                    await postAdmin({ action: "statusUpdate", orderId: order.id, newStatus });
+                    if (!opts.silent) {
+                        const label = newStatus === '受渡済' ? (order.deliveryMethod === '配送' ? '配達済' : 'お渡し済') : newStatus;
+                        showToast(`${order.storeName || order.userName}：${label}にしました`, null, () => setOrderStatus({ ...order, status: newStatus }, prev, { silent: true }));
+                    }
+                }
                 catch (e) { showMessage("状態の更新に失敗しました: " + e.message, 6000); setOrders(p => p.map(o => o.id === order.id ? { ...o, status: prev } : o)); }
             };
 
@@ -788,18 +816,52 @@
                 }
                 setBulkRunning(true);
                 let done = 0;
+                const rows = [];
                 try {
                     for (const p of items) {
-                        await postAdmin({ action: "stockUpdate", productId: p.id, type: bulkType, amount: bulkQty[p.id], memo: 'まとめて入力' });
+                        const res = await postAdmin({ action: "stockUpdate", productId: p.id, type: bulkType, amount: bulkQty[p.id], memo: 'まとめて入力' });
+                        if (res.logRow) rows.push(res.logRow);
                         done++; setBulkProgress(done);
                     }
-                    showMessage(`${done}商品をまとめて記録しました`);
+                    showToast(`${done}商品をまとめて記録しました`, null, rows.length ? () => undoLogs(rows) : null);
                     setBulkQty({}); setBulkMode(false);
                 } catch (e) {
                     showMessage(`${done}商品まで記録しました。残りは記録できませんでした: ${e.message}`, 8000);
                 } finally {
                     setBulkRunning(false); setBulkProgress(0); fetchData(viewStartMonth, viewEndMonth);
                 }
+            };
+
+            // 在庫の記録を取り消す（まとめて）
+            const undoLogs = async (rows) => {
+                try {
+                    for (const r of rows) await postAdmin({ action: "cancelStockLog", rowIndex: r });
+                    showMessage('取り消して、在庫を元に戻しました');
+                } catch (e) { showMessage('取り消せませんでした: ' + e.message, 7000); }
+                fetchData(viewStartMonth, viewEndMonth);
+            };
+            // 下から出る画面（共通）
+            const sheetWrap = (onClose, children) => (
+                <div className="no-print fixed inset-0 bg-black/40 z-[70] flex flex-col justify-end lg:justify-center items-center" onClick={onClose}>
+                    <div className="bg-white rounded-t-3xl lg:rounded-3xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto p-4 animate-slide-up" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+                        <div className="w-10 h-1 rounded-full bg-gray-300 mx-auto mb-3 lg:hidden"></div>
+                        {children}
+                    </div>
+                </div>
+            );
+            // 確認の画面（共通）：{ icon, iconCls, title, body, rows:[[左, 右]], confirmLabel, danger, onConfirm }
+            const renderConfirmSheet = () => {
+                const c = confirmSheet;
+                if (!c) return null;
+                const close = () => !confirmBusy && setConfirmSheet(null);
+                return sheetWrap(close, <>
+                    <div className="text-center"><div className={`w-12 h-12 rounded-full text-2xl flex items-center justify-center mx-auto ${c.iconCls || 'bg-red-50 text-red-500'}`}>{c.icon || '↩'}</div><h3 className="text-lg font-bold text-gray-900 mt-2">{c.title}</h3>{c.body && <p className="text-xs text-gray-500 mt-0.5">{c.body}</p>}</div>
+                    {c.rows && c.rows.length > 0 && <div className="bg-white rounded-2xl border border-gray-200 mt-3 divide-y divide-gray-100 text-sm">{c.rows.map(([l, r], i) => <div key={i} className={`flex justify-between px-3 py-2 ${i === c.rows.length - 1 && c.totalRow ? 'bg-gray-50 font-bold' : ''}`}><span>{l}</span><b>{r}</b></div>)}</div>}
+                    <div className="grid grid-cols-2 gap-2 mt-4 font-bold">
+                        <button type="button" onClick={close} className="py-3 rounded-xl bg-gray-100 text-gray-700">やめる</button>
+                        <button type="button" disabled={confirmBusy} onClick={async () => { setConfirmBusy(true); try { await c.onConfirm(); } finally { setConfirmBusy(false); setConfirmSheet(null); } }} className={`py-3 rounded-xl flex justify-center items-center gap-2 ${c.danger === 'fill' ? 'bg-red-500 text-white' : c.danger ? 'bg-white border border-red-300 text-red-600' : 'bg-nanairo-dark text-white'}`}>{confirmBusy ? <div className="spinner spinner-dark w-4 h-4"></div> : c.confirmLabel}</button>
+                    </div>
+                </>);
             };
 
             const statusChip = (o) => {
@@ -951,8 +1013,8 @@
                 ];
                 const markTodayReady = async () => {
                     const list = todays.filter(o => o.status === '未対応');
-                    for (const o of list) await setOrderStatus(o, '準備完了');
-                    showMessage(`${list.length}件を準備完了にしました`);
+                    for (const o of list) await setOrderStatus(o, '準備完了', { silent: true });
+                    showToast(`${list.length}件を準備完了にしました`, null, async () => { for (const o of list) await setOrderStatus({ ...o, status: '準備完了' }, '未対応', { silent: true }); });
                 };
 
                 // 済んだ注文
@@ -1111,67 +1173,92 @@
                     );
                 }
 
-                // 最近の記録（日ごと）
+                // 最近の記録：同じ時刻の「全部ロス」「まとめて入力」は1つにまとめる
+                const items = [];
+                stockLogs.forEach(log => {
+                    const d = String(log.date).slice(0, 5), t = String(log.date).slice(6);
+                    const groupable = log.memo === '一括ロス' || log.memo === 'まとめて入力';
+                    const last = items[items.length - 1];
+                    if (groupable && last && last.group && last.d === d && last.t === t && last.type === log.type && last.memo === log.memo) { last.logs.push(log); return; }
+                    items.push({ key: log.rowIndex, d, t, type: log.type, memo: log.memo, group: groupable, logs: [log] });
+                });
                 const md = (offset) => new Date(Date.now() + 9 * 3600 * 1000 - offset * 86400000).toISOString().slice(5, 10).replace('-', '/');
                 const dayLabel = (d) => d === md(0) ? '今日' : d === md(1) ? '昨日' : d.replace(/^0/, '').replace('/0', '/');
-                const logGroups = [];
-                stockLogs.forEach(log => {
-                    const d = String(log.date).slice(0, 5);
-                    let g = logGroups.find(x => x.d === d);
-                    if (!g) logGroups.push(g = { d, list: [] });
-                    g.list.push(log);
-                });
+                const days = [];
+                items.forEach(it => { let g = days.find(x => x.d === it.d); if (!g) days.push(g = { d: it.d, items: [] }); g.items.push(it); });
+                const DOT = { '収穫': ['bg-nanairo-dark', '＋', 'text-nanairo-dark', '+', 'を収穫'], '店頭販売': ['bg-blue-500', '¥', 'text-blue-600', '−', 'を店頭販売'], 'ロス': ['bg-red-500', '−', 'text-red-500', '−', 'をロス'], '委託納品': ['bg-orange-400', '🏪', 'text-orange-600', '−', 'を委託に納品'], '委託ロス': ['bg-orange-400', '🏪', 'text-orange-600', '', 'の委託ロス（回収）'], '納品取消': ['bg-gray-400', '↩', 'text-gray-600', '+', 'の納品を取消'], '精算取消': ['bg-gray-400', '↩', 'text-gray-600', '', 'の精算を取消'] };
+                const daySum = (g) => {
+                    const sum = {};
+                    g.items.forEach(it => it.logs.forEach(l => { if (l.status !== '取消') sum[l.type] = (sum[l.type] || 0) + l.amount; }));
+                    return [['収穫', '収穫 +', 'bg-nanairo-light text-nanairo-dark'], ['店頭販売', '販売 −', 'bg-blue-50 text-blue-600'], ['ロス', 'ロス −', 'bg-red-50 text-red-500'], ['委託納品', '委託 −', 'bg-orange-50 text-orange-600']].filter(([k]) => sum[k]).map(([k, l, cls]) => <span key={k} className={`px-2 py-0.5 rounded-full ${cls}`}>{l}{sum[k]}</span>);
+                };
+                const records = (
+                    <div>
+                        <b className="text-gray-900">最近の記録</b>
+                        {days.length === 0 && <div className="text-center py-6 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm mt-2">記録はありません</div>}
+                        {days.map((g, gi) => (
+                            <div key={g.d} className="mt-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${gi === 0 && dayLabel(g.d) === '今日' ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-600'}`}>{dayLabel(g.d)}</span>
+                                    <div className="flex gap-1 text-[11px] font-bold flex-wrap">{daySum(g)}</div>
+                                </div>
+                                <div className="relative mt-1.5 pl-1">
+                                    <div className="absolute left-[46px] top-3 bottom-3 w-0.5 bg-gray-200"></div>
+                                    {g.items.map(it => {
+                                        const m = DOT[it.type] || ['bg-gray-400', '•', 'text-gray-600', '', ''];
+                                        const cancelled = it.logs.every(l => l.status === '取消');
+                                        const total = it.logs.filter(l => l.status !== '取消').reduce((a, l) => a + l.amount, 0) || it.logs.reduce((a, l) => a + l.amount, 0);
+                                        const canUndo = !cancelled && ['収穫', '店頭販売', 'ロス'].includes(it.type);
+                                        const title = it.logs.length > 1 ? `${it.memo === '一括ロス' ? '残りを全部ロス' : `まとめて${it.type === '店頭販売' ? '販売' : it.type}`}（${it.logs.length}商品）` : null;
+                                        return (
+                                            <button key={it.key} type="button" disabled={!canUndo} onClick={() => setLogSheet(it)} className={`w-full flex items-center gap-3 py-1 text-left ${cancelled ? 'opacity-40' : ''}`}>
+                                                <span className="w-8 text-[10px] text-gray-400 text-right shrink-0">{it.t}</span>
+                                                <span className={`relative z-10 w-6 h-6 rounded-full text-white text-xs flex items-center justify-center shrink-0 ${cancelled ? 'bg-gray-300' : m[0]}`}>{cancelled ? '↩' : m[1]}</span>
+                                                <div className="flex-1 min-w-0 bg-white rounded-xl border border-gray-200 px-3 py-2">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className={`text-sm truncate ${cancelled ? 'line-through' : ''}`}>{title ? <b>{title}</b> : <><b>{it.logs[0].name}</b> {m[4]}</>}</span>
+                                                        {cancelled ? <span className="text-[10px] text-gray-500 shrink-0">取り消し済み</span> : <b className={`shrink-0 ${m[2]}`}>{m[3]}{total}</b>}
+                                                    </div>
+                                                    {title && <div className="text-[10px] text-gray-500 truncate">{it.logs.map(l => `${l.name}${l.amount}`).join('・')}</div>}
+                                                    {!title && it.memo && <div className="text-[10px] text-gray-500 truncate">{it.memo}</div>}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ))}
+                        <p className="text-[11px] text-gray-400 mt-2">記録をタップすると取り消せます</p>
+                    </div>
+                );
                 return (
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                         <div className="flex justify-between items-center">
                             <h1 className="text-lg font-bold text-gray-900">在庫</h1>
-                            <div className="flex gap-2">
-                                <button type="button" onClick={() => { setBulkType('add'); setBulkMode(true); }} className="text-sm font-bold text-white bg-nanairo-dark rounded-full px-4 py-2">まとめて入力</button>
-                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full border border-gray-200 text-gray-500"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button>
-                            </div>
+                            <div className="flex items-center gap-2"><span className="text-xs text-gray-500">{shortDate(todayStr)}</span>
+                                <button type="button" onClick={handleRefresh} disabled={isFetchingData} className="p-2 bg-white rounded-full border border-gray-200 text-gray-500"><Icons.RefreshCw className={`w-5 h-5 ${isFetchingData ? 'animate-spin' : ''}`} /></button></div>
                         </div>
-                        <p className="text-xs text-gray-500 -mt-2">商品をタップして1つずつ、または「まとめて入力」で全商品を一度に記録します。</p>
-                        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                            {products.map(p => (
-                                <button key={p.id} type="button" onClick={() => openStockSheet(p.id)} className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left active:scale-[0.98] transition-transform">
-                                    {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
-                                    <div className="p-2 flex items-end justify-between gap-1">
-                                        <div className="min-w-0"><div className="font-bold text-sm text-gray-900 truncate">{p.name}</div><div className="text-xs text-gray-500">{p.weight}</div></div>
-                                        <span className={`text-2xl font-bold leading-none ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500' : 'text-gray-900'}`}>{p.stock}</span>
-                                    </div>
-                                </button>
-                            ))}
-                        </section>
-
-                        <div>
-                            <h3 className="font-bold text-gray-900 mb-1">最近の記録</h3>
-                            {logGroups.length === 0 ? <div className="text-center py-6 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">記録はありません</div> : logGroups.map(g => (
-                                <div key={g.d} className="mt-2">
-                                    <div className="text-xs font-bold text-gray-500 mb-1.5">{dayLabel(g.d)}</div>
-                                    <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
-                                        {g.list.map(log => {
-                                            const meta = LOG_META[log.type] || ['•', 'bg-gray-100', 'text-gray-600', ''];
-                                            const cancelled = log.status === '取消';
-                                            const canUndo = !cancelled && ['収穫', '店頭販売', 'ロス'].includes(log.type);
-                                            return (
-                                                <div key={log.rowIndex} className={`flex items-center gap-3 px-3 py-2.5 ${cancelled ? 'opacity-40' : ''}`}>
-                                                    <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${meta[1]}`}>{meta[0]}</span>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className={`text-sm ${cancelled ? 'line-through' : ''}`}><b>{log.name}</b> <span className={`font-bold ${meta[2]}`}>{meta[3]}{log.amount}</span></div>
-                                                        <div className="text-xs text-gray-500 truncate">{log.type}・{String(log.date).slice(6)}{log.memo ? `　${log.memo}` : ''}{cancelled ? '（取り消し済み）' : ''}</div>
-                                                    </div>
-                                                    {canUndo && <button type="button" onClick={() => setCancelTargetLog(log)} className="text-xs text-gray-400 underline shrink-0">取り消す</button>}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                        <div className="lg:flex lg:gap-6 lg:items-start">
+                            <div className="flex-1 space-y-3">
+                                <div className="grid grid-cols-2 gap-2 text-sm font-bold">
+                                    <button type="button" onClick={() => { setBulkType('add'); setBulkMode(true); }} className="py-3 rounded-xl bg-nanairo-dark text-white">🌱 まとめて入力</button>
+                                    <button type="button" onClick={() => setShowBulkLossModal(true)} className="py-3 rounded-xl bg-white border border-red-200 text-red-600">🗑 残りを全部ロス</button>
                                 </div>
-                            ))}
+                                <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-2">
+                                    {products.map(p => (
+                                        <button key={p.id} type="button" onClick={() => openStockSheet(p.id)} className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left active:scale-[0.98] transition-transform">
+                                            {IMAGE_MAP[p.name] ? <img src={IMAGE_MAP[p.name]} alt="" loading="lazy" className={`w-full h-20 object-cover ${p.stock <= 0 ? 'grayscale opacity-60' : ''}`} /> : <div className="w-full h-20 bg-nanairo-light flex items-center justify-center text-nanairo-dark text-xs font-bold">{p.name}</div>}
+                                            <div className="p-2 flex items-end justify-between gap-1">
+                                                <div className="min-w-0"><div className="font-bold text-sm text-gray-900 truncate">{p.name}</div><div className="text-xs text-gray-500">{p.weight}</div></div>
+                                                <span className={`text-2xl font-bold leading-none ${p.stock <= 0 ? 'text-gray-300' : p.stock <= 5 ? 'text-orange-500' : 'text-gray-900'}`}>{p.stock}</span>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </section>
+                                <p className="text-xs text-gray-500">商品をタップすると1つずつ記録できます。</p>
+                            </div>
+                            <div className="mt-4 lg:mt-0 lg:w-[360px] lg:shrink-0 lg:sticky lg:top-20">{records}</div>
                         </div>
-
-                        <button type="button" onClick={() => setShowBulkLossModal(true)} className="w-full bg-white text-red-600 border border-red-200 rounded-xl py-3 font-bold text-sm flex justify-center items-center gap-2">
-                            <Icons.AlertTriangle className="w-4 h-4" /> 今ある在庫をすべてロスにする
-                        </button>
                     </div>
                 );
             };
@@ -1255,7 +1342,7 @@
                     .sort((a, b) => a.list[0].pickupDate.localeCompare(b.list[0].pickupDate));
                 const payAll = async (c) => {
                     for (const o of c.list) await toggleCheck(o.id, 'paid', true);
-                    showMessage(`${c.name}：${c.list.length}件を集金済にしました`);
+                    showToast(`${c.name}：${c.list.length}件を集金済にしました`, null, async () => { for (const o of c.list) await toggleCheck(o.id, 'paid', false); });
                 };
                 return (
                     <div className="space-y-3 max-w-[600px]">
@@ -1423,37 +1510,35 @@
                                 </div>
                             )}
 
-                            <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">未精算（売れた数とロスを入れて精算）</b><span className="text-xs text-gray-500">{st.pending.length}件</span></div>
+                            <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">未精算</b><span className="text-xs text-gray-500">{st.pending.length}件</span></div>
                             {st.pending.length === 0 ? <div className="text-center py-5 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">未精算の納品はありません</div> : (
-                                <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
-                                    {st.pending.map(d => (
-                                        <div key={d.id} className="flex items-center gap-2 px-3 py-2.5">
-                                            <div className="flex-1 min-w-0"><b className="text-sm">{d.productName}</b> <span className="text-sm">× {d.deliveryQty}</span><div className="text-xs text-gray-500">{shortDate(d.date)} 納品</div></div>
-                                            <button type="button" onClick={() => { setInventoryModal(d); setInvSalesQty(d.deliveryQty); setInvLossQty(0); }} className="text-xs font-bold text-white bg-orange-500 rounded-lg px-3 py-2">精算する</button>
-                                            <button type="button" onClick={() => setCancelDeliveryTarget(d)} className="text-xs text-gray-400 underline">取消</button>
-                                        </div>
-                                    ))}
+                                <div className="bg-white rounded-2xl border border-orange-200 p-3">
+                                    <div className="divide-y divide-gray-100 text-sm">
+                                        {st.pending.map(d => <div key={d.id} className="flex justify-between py-1.5"><span>{d.productName} × {d.deliveryQty}</span><span className="text-xs text-gray-500">{shortDate(d.date)} 納品</span></div>)}
+                                    </div>
+                                    <button type="button" onClick={() => { const sold = {}; st.pending.forEach(d => { sold[d.id] = d.deliveryQty; }); setSettleSheet({ agencyId: sel.id, sold }); }} className="w-full mt-2 py-3 rounded-xl bg-orange-500 text-white font-bold">この店を精算する</button>
                                 </div>
                             )}
 
                             <div className="flex items-center justify-between pt-1"><b className="text-sm text-gray-900">納品と精算の履歴</b><span className="text-xs text-gray-500">{st.batchList.length}回</span></div>
-                            <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
-                                {st.batchList.length === 0 && <div className="text-center py-5 text-gray-400 text-sm">まだ納品がありません</div>}
+                            {st.batchList.length === 0 && <div className="text-center py-5 bg-white rounded-2xl border border-gray-200 text-gray-400 text-sm">まだ納品がありません</div>}
+                            <div className="space-y-2">
                                 {st.batchList.map(b => {
                                     const settledItems = b.items.filter(d => d.status === '精算済');
                                     const allSettled = settledItems.length === b.items.length;
+                                    const sold = settledItems.reduce((s, d) => s + d.salesQty, 0), lost = settledItems.reduce((s, d) => s + d.lossQty, 0);
                                     return (
-                                        <div key={b.key} className="px-3 py-2.5">
+                                        <div key={b.key} className="bg-white rounded-2xl border border-gray-200 p-3">
                                             <div className="flex justify-between items-start gap-2">
-                                                <span className="text-sm"><b>{shortDate(b.date)} 納品</b>　{b.items.map(d => `${d.productName}${d.deliveryQty}`).join('・')}</span>
-                                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${allSettled ? 'bg-gray-100 text-gray-600' : 'bg-orange-50 text-orange-700'}`}>{allSettled ? `精算済 ¥${settledItems.reduce((s, d) => s + Math.floor(d.pureSalesExTax * 1.08), 0).toLocaleString()}` : '未精算あり'}</span>
+                                                <div className="min-w-0"><b className="text-sm">{shortDate(b.date)} 納品</b><div className="text-xs text-gray-500 truncate">{b.items.map(d => `${d.productName}${d.deliveryQty}`).join('・')}</div></div>
+                                                <button type="button" onClick={() => setBatchMenu({ agencyId: sel.id, key: b.key })} className="w-8 h-8 -mt-1 -mr-1 rounded-full text-gray-400 text-lg leading-none hover:bg-gray-100" aria-label="メニュー">⋯</button>
                                             </div>
-                                            {settledItems.length > 0 && <div className="text-[11px] text-gray-500 mt-0.5">{settledItems.map(d => `${d.productName} 売れた${d.salesQty}・ロス${d.lossQty}`).join('／')}</div>}
-                                            <div className="flex flex-wrap gap-3 mt-1 text-[11px] font-bold">
-                                                <button type="button" onClick={() => printAgencyDoc(sel, b.items, 'deliver')} className="text-gray-500">🖨 納品書を再発行</button>
-                                                {settledItems.length > 0 && <button type="button" onClick={() => printAgencyDoc(sel, settledItems, 'settle')} className="text-gray-500">🖨 精算明細書</button>}
-                                                {settledItems.map(d => <button key={d.id} type="button" onClick={() => setCancelInventoryTarget(d)} className="text-gray-400 underline font-normal">{d.productName}の精算を取消</button>)}
+                                            <div className="flex items-center gap-1 mt-2 text-[10px] font-bold">
+                                                <span className="px-2 py-0.5 rounded-full bg-nanairo-dark text-white">✓ 納品</span>
+                                                <span className={`flex-1 h-0.5 ${allSettled ? 'bg-nanairo-dark' : 'bg-gray-200'}`}></span>
+                                                {allSettled ? <span className="px-2 py-0.5 rounded-full bg-nanairo-dark text-white">✓ 精算</span> : <span className="px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200">{settledItems.length ? '一部未精算' : '未精算'}</span>}
                                             </div>
+                                            {settledItems.length > 0 && <div className="text-xs text-gray-600 mt-1.5">売れた {sold}・ロス {lost}　<b>¥{settledItems.reduce((s, d) => s + Math.floor(d.pureSalesExTax * 1.08), 0).toLocaleString()}</b></div>}
                                         </div>
                                     );
                                 })}
@@ -2131,113 +2216,135 @@
                         })}
                     </div>
 
-                    {showBulkLossModal && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in no-print">
-                            <div className="bg-white rounded-2xl w-full max-w-[320px] p-5 shadow-xl animate-slide-up">
-                                <div className="flex flex-col items-center text-center mb-4">
-                                    <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-3"><Icons.AlertTriangle className="w-7 h-7" /></div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-1">在庫を一括ロスしますか？</h3>
-                                    <p className="text-xs text-gray-500">現在在庫が残っているすべての商品の在庫を「0」にし、一括でロス（破棄）として記録します。<br/><span className="text-red-500 mt-1 inline-block">この操作は一度に多数のデータを更新します。</span></p>
+                    {showBulkLossModal && (() => {
+                        const targets = allProducts.filter(p => p.stock > 0);
+                        const close = () => !isBulkSubmitting && setShowBulkLossModal(false);
+                        return sheetWrap(close, <>
+                            <div className="text-center"><div className="w-12 h-12 rounded-full bg-red-50 text-red-500 text-2xl flex items-center justify-center mx-auto">🗑</div><h3 className="text-lg font-bold text-gray-900 mt-2">残りを全部ロスにしますか？</h3><p className="text-xs text-gray-500">今ある在庫を0にして、ロスとして記録します</p></div>
+                            {targets.length === 0 ? <div className="text-center text-sm text-gray-400 py-6">在庫が残っている商品はありません</div> : (
+                                <div className="bg-white rounded-2xl border border-gray-200 mt-3 divide-y divide-gray-100 text-sm">
+                                    {targets.map(p => <div key={p.id} className="flex justify-between px-3 py-2"><span>{p.name}</span><b>{p.stock}</b></div>)}
+                                    <div className="flex justify-between px-3 py-2 bg-gray-50 rounded-b-2xl"><b>合計 {targets.length}商品</b><b className="text-red-500">{targets.reduce((a, p) => a + p.stock, 0)}個（¥{targets.reduce((a, p) => a + p.stock * p.price, 0).toLocaleString()}）</b></div>
                                 </div>
-                                <div className="flex gap-2">
-                                    <button type="button" onClick={() => setShowBulkLossModal(false)} disabled={isBulkSubmitting} className="flex-1 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl active:bg-gray-200">キャンセル</button>
-                                    <button type="button" onClick={handleBulkLoss} disabled={isBulkSubmitting} className="flex-1 bg-red-500 text-white font-bold py-3 rounded-xl active:bg-red-600 flex justify-center items-center gap-2">{isBulkSubmitting ? <div className="spinner border-l-white w-4 h-4"></div> : '一括ロス実行'}</button>
-                                </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-2 mt-4 font-bold">
+                                <button type="button" onClick={close} className="py-3 rounded-xl bg-gray-100 text-gray-700">やめる</button>
+                                <button type="button" onClick={handleBulkLoss} disabled={isBulkSubmitting || targets.length === 0} className={`py-3 rounded-xl flex justify-center items-center gap-2 text-white ${isBulkSubmitting || targets.length === 0 ? 'bg-gray-300' : 'bg-red-500'}`}>{isBulkSubmitting ? <div className="spinner w-4 h-4"></div> : '全部ロスにする'}</button>
                             </div>
-                        </div>
-                    )}
+                        </>);
+                    })()}
 
-                    {cancelTargetLog && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in no-print">
-                            <div className="bg-white rounded-2xl w-full max-w-[320px] p-5 shadow-xl animate-slide-up">
-                                <div className="flex flex-col items-center text-center mb-4">
-                                    <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-3"><Icons.AlertTriangle className="w-7 h-7" /></div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-1">この記録を取り消しますか？</h3>
-                                    <p className="text-xs text-gray-500">在庫数は自動的に元に戻ります。<br/>店頭販売の場合は売上からも除外されます。</p>
-                                </div>
-                                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 font-bold border border-gray-200 mb-5 text-center">{cancelTargetLog.type}：{cancelTargetLog.name} {cancelTargetLog.amount}P</div>
-                                <div className="flex gap-2">
-                                    <button type="button" onClick={() => setCancelTargetLog(null)} disabled={isCancelling} className="flex-1 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl active:bg-gray-200">閉じる</button>
-                                    <button type="button" onClick={handleCancelStockLog} disabled={isCancelling} className="flex-1 bg-red-500 text-white font-bold py-3 rounded-xl active:bg-red-600 flex justify-center items-center gap-2">{isCancelling ? <div className="spinner border-l-white w-4 h-4"></div> : '取り消す'}</button>
-                                </div>
+                    {logSheet && (() => {
+                        const it = logSheet;
+                        const live = it.logs.filter(l => l.status !== '取消');
+                        const m = { '収穫': ['bg-nanairo-dark', '＋', '収穫'], '店頭販売': ['bg-blue-500', '¥', '店頭販売'], 'ロス': ['bg-red-500', '−', 'ロス'] }[it.type] || ['bg-gray-400', '•', it.type];
+                        const after = (l) => { const p = allProducts.find(x => x.id === l.productId); if (!p) return null; return it.type === '収穫' ? p.stock - l.amount : p.stock + l.amount; };
+                        const close = () => !confirmBusy && setLogSheet(null);
+                        return sheetWrap(close, <>
+                            <div className="flex items-center gap-3"><span className={`w-10 h-10 rounded-full text-white flex items-center justify-center ${m[0]}`}>{m[1]}</span><div><b className="text-gray-900">{live.length > 1 ? `${it.memo === '一括ロス' ? '残りを全部ロス' : 'まとめて' + m[2]}（${live.length}商品）` : `${live[0] ? live[0].name : ''} を${m[2]}`}</b><div className="text-xs text-gray-500">{it.d} {it.t}{it.memo && live.length === 1 ? `　${it.memo}` : ''}</div></div></div>
+                            <div className="bg-white rounded-2xl border border-gray-200 mt-3 divide-y divide-gray-100 text-sm">
+                                <div className="flex justify-between px-3 py-2 text-[11px] font-bold text-gray-500"><span>取り消すと在庫は</span><span>いま → 取り消し後</span></div>
+                                {live.map(l => { const p = allProducts.find(x => x.id === l.productId); return <div key={l.rowIndex} className="flex justify-between px-3 py-2"><span>{l.name} <span className="text-gray-400">{it.type === '収穫' ? '+' : '−'}{l.amount}</span></span><b>{p ? `${p.stock} → ${after(l)}` : '—'}</b></div>; })}
                             </div>
-                        </div>
-                    )}
-
-                    {cancelDeliveryTarget && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in no-print">
-                            <div className="bg-white rounded-2xl w-full max-w-[320px] p-5 shadow-xl animate-slide-up">
-                                <div className="flex flex-col items-center text-center mb-4">
-                                    <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-3"><Icons.X className="w-7 h-7" /></div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-1">納品を取り消しますか？</h3>
-                                    <p className="text-xs text-gray-500">商品はシステム在庫に戻ります。<br/>※すでに精算されている場合は取り消せません。</p>
-                                </div>
-                                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 font-bold border border-gray-200 mb-5 text-center">
-                                    <div className="text-xs text-gray-500 mb-1">{cancelDeliveryTarget.agencyName}</div>
-                                    {cancelDeliveryTarget.productName} ({cancelDeliveryTarget.deliveryQty}P)
-                                </div>
-                                <div className="flex gap-2">
-                                    <button type="button" onClick={() => setCancelDeliveryTarget(null)} disabled={isCancelling} className="flex-1 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl active:bg-gray-200">閉じる</button>
-                                    <button type="button" onClick={handleCancelAgencyDelivery} disabled={isCancelling} className="flex-1 bg-red-500 text-white font-bold py-3 rounded-xl active:bg-red-600 flex justify-center items-center gap-2">{isCancelling ? <div className="spinner border-l-white w-4 h-4"></div> : '取り消す'}</button>
-                                </div>
+                            <div className="grid grid-cols-2 gap-2 mt-4 font-bold">
+                                <button type="button" onClick={close} className="py-3 rounded-xl bg-gray-100 text-gray-700">閉じる</button>
+                                <button type="button" disabled={confirmBusy} onClick={async () => { setConfirmBusy(true); await undoLogs(live.map(l => l.rowIndex)); setConfirmBusy(false); setLogSheet(null); }} className="py-3 rounded-xl bg-white border border-red-300 text-red-600 flex justify-center items-center">{confirmBusy ? <div className="spinner spinner-dark w-4 h-4"></div> : 'この記録を取り消す'}</button>
                             </div>
-                        </div>
-                    )}
+                        </>);
+                    })()}
 
-                    {cancelInventoryTarget && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in no-print">
-                            <div className="bg-white rounded-2xl w-full max-w-[320px] p-5 shadow-xl animate-slide-up">
-                                <div className="flex flex-col items-center text-center mb-4">
-                                    <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-3"><Icons.X className="w-7 h-7" /></div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-1">精算を取り消しますか？</h3>
-                                    <p className="text-xs text-gray-500">未精算の状態に戻ります。<br/>売上から除外され、回収したロスも元に戻ります。</p>
-                                </div>
-                                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 font-bold border border-gray-200 mb-5 text-center">
-                                    <div className="text-xs text-gray-500 mb-1">{cancelInventoryTarget.agencyName}</div>
-                                    {cancelInventoryTarget.productName}
-                                </div>
-                                <div className="flex gap-2">
-                                    <button type="button" onClick={() => setCancelInventoryTarget(null)} disabled={isCancelling} className="flex-1 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl active:bg-gray-200">閉じる</button>
-                                    <button type="button" onClick={handleCancelAgencyInventory} disabled={isCancelling} className="flex-1 bg-red-500 text-white font-bold py-3 rounded-xl active:bg-red-600 flex justify-center items-center gap-2">{isCancelling ? <div className="spinner border-l-white w-4 h-4"></div> : '取り消す'}</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {inventoryModal && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-fade-in no-print">
-                            <div className="bg-white rounded-2xl w-full max-w-[320px] p-5 shadow-xl animate-slide-up">
-                                <div className="mb-4">
-                                    <h3 className="text-lg font-bold text-gray-900 mb-1">棚卸し入力</h3>
-                                    <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">{inventoryModal.agencyName}<br/><span className="font-bold text-black">{inventoryModal.productName}</span> (納品数: {inventoryModal.deliveryQty})</p>
-                                </div>
-                                <div className="space-y-4 mb-6">
-                                    <div>
-                                        <label className="block text-sm font-bold text-blue-600 mb-1">売れた数 (実売数)</label>
-                                        <div className="flex items-center border-2 border-blue-200 rounded-xl bg-blue-50 h-12 overflow-hidden">
-                                            <button type="button" onClick={() => { const next = Math.max(0, invSalesQty - 1); setInvSalesQty(next); setInvLossQty(inventoryModal.deliveryQty - next); }} className="w-12 h-full flex justify-center items-center text-blue-600 bg-blue-100 active:bg-blue-200"><Icons.Minus className="w-4 h-4" /></button>
-                                            <div className="flex-1 text-center font-bold text-lg text-blue-900 pt-1">{invSalesQty}</div>
-                                            <button type="button" onClick={() => { const next = Math.min(inventoryModal.deliveryQty, invSalesQty + 1); setInvSalesQty(next); setInvLossQty(inventoryModal.deliveryQty - next); }} className="w-12 h-full flex justify-center items-center text-blue-600 bg-blue-100 active:bg-blue-200"><Icons.Plus className="w-4 h-4" /></button>
+                    {settleSheet && (() => {
+                        const a = agencies.find(x => x.id === settleSheet.agencyId);
+                        if (!a) return null;
+                        const pending = agencyStats(a).pending;
+                        const calc = (d) => { const sold = settleSheet.sold[d.id] || 0; const ex = Math.floor(agencyPriceOf(a.id, d.productId) / 1.08); const salesEx = ex * sold; const fee = Math.floor(salesEx * a.feeRate); return { sold, loss: d.deliveryQty - sold, fee, pure: salesEx - fee }; };
+                        const rows = pending.map(d => ({ d, ...calc(d) }));
+                        const pureTotal = rows.reduce((s, r) => s + r.pure, 0);
+                        const billing = pureTotal + Math.floor(pureTotal * 0.08);
+                        const setSold = (id, v, max) => setSettleSheet(prev => ({ ...prev, sold: { ...prev.sold, [id]: Math.max(0, Math.min(max, v)) } }));
+                        const submit = async () => {
+                            setIsSubmittingDelivery(true);
+                            let done = 0;
+                            try {
+                                for (const r of rows) { await postAdmin({ action: "agencyInventory", deliveryId: r.d.id, salesQty: r.sold, lossQty: r.loss }); done++; }
+                                showMessage(`${a.name} の精算を記録しました`);
+                                printAgencyDoc(a, rows.map(r => ({ ...r.d, salesQty: r.sold, lossQty: r.loss, feeAmountExTax: r.fee, pureSalesExTax: r.pure })), 'settle');
+                                setSettleSheet(null);
+                            } catch (e) { showMessage(`${done}件まで精算しました。残りは記録できませんでした: ${e.message}`, 8000); }
+                            finally { setIsSubmittingDelivery(false); fetchData(viewStartMonth, viewEndMonth); }
+                        };
+                        return sheetWrap(() => !isSubmittingDelivery && setSettleSheet(null), <>
+                            <h3 className="text-lg font-bold text-gray-900">{a.name} を精算</h3>
+                            <p className="text-xs text-gray-500">お店で数えた<b>売れた数</b>を入れてください。残りはロス（回収）になります。</p>
+                            <div className="mt-3 space-y-2">
+                                {rows.map(r => (
+                                    <div key={r.d.id} className="bg-white rounded-2xl border border-gray-200 p-3">
+                                        <div className="flex justify-between items-center gap-2">
+                                            <div className="min-w-0"><b className="text-sm">{r.d.productName}</b><div className="text-[11px] text-gray-500">{shortDate(r.d.date)} 納品 {r.d.deliveryQty}個・店頭 {agencyPriceOf(a.id, r.d.productId) ? `¥${agencyPriceOf(a.id, r.d.productId)}` : '価格未設定'}</div></div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <button type="button" onClick={() => setSold(r.d.id, r.sold - 1, r.d.deliveryQty)} className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-500"><Icons.Minus className="w-4 h-4" /></button>
+                                                <b className="w-6 text-center text-lg">{r.sold}</b>
+                                                <button type="button" onClick={() => setSold(r.d.id, r.sold + 1, r.d.deliveryQty)} className="w-8 h-8 rounded-full bg-nanairo-dark text-white flex items-center justify-center"><Icons.Plus className="w-4 h-4" /></button>
+                                            </div>
                                         </div>
+                                        <div className="text-[11px] text-gray-500 mt-1 text-right">売れた {r.sold}・ロス <b className={r.loss ? 'text-red-500' : 'text-gray-700'}>{r.loss}</b></div>
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-red-600 mb-1">回収した数 (ロス)</label>
-                                        <div className="flex items-center border-2 border-red-200 rounded-xl bg-red-50 h-12 overflow-hidden">
-                                            <button type="button" onClick={() => { const next = Math.max(0, invLossQty - 1); setInvLossQty(next); setInvSalesQty(inventoryModal.deliveryQty - next); }} className="w-12 h-full flex justify-center items-center text-red-600 bg-red-100 active:bg-red-200"><Icons.Minus className="w-4 h-4" /></button>
-                                            <div className="flex-1 text-center font-bold text-lg text-red-900 pt-1">{invLossQty}</div>
-                                            <button type="button" onClick={() => { const next = Math.min(inventoryModal.deliveryQty, invLossQty + 1); setInvLossQty(next); setInvSalesQty(inventoryModal.deliveryQty - next); }} className="w-12 h-full flex justify-center items-center text-red-600 bg-red-100 active:bg-red-200"><Icons.Plus className="w-4 h-4" /></button>
-                                        </div>
-                                    </div>
-                                    <div className="text-center text-xs font-bold text-gray-500 bg-gray-100 p-2 rounded">
-                                        合計: {invSalesQty + invLossQty} / 納品数: {inventoryModal.deliveryQty}
-                                        {invSalesQty + invLossQty !== inventoryModal.deliveryQty && <span className="block text-red-500 mt-1">※合計が納品数と一致しません</span>}
-                                    </div>
-                                </div>
-                                <div className="flex gap-2">
-                                    <button type="button" onClick={() => setInventoryModal(null)} className="flex-1 bg-gray-100 text-gray-700 font-bold py-3 rounded-xl active:bg-gray-200">キャンセル</button>
-                                    <button type="button" onClick={handleAgencyInventory} disabled={isSubmittingDelivery || (invSalesQty + invLossQty !== inventoryModal.deliveryQty)} className={`flex-1 font-bold py-3 rounded-xl flex justify-center items-center gap-2 ${isSubmittingDelivery || (invSalesQty + invLossQty !== inventoryModal.deliveryQty) ? 'bg-gray-300 text-gray-500' : 'bg-agency text-white active:bg-orange-600'}`}>{isSubmittingDelivery ? <div className="spinner border-l-white w-4 h-4"></div> : '精算確定'}</button>
-                                </div>
+                                ))}
                             </div>
+                            <div className="bg-white rounded-2xl border border-gray-200 mt-3 px-3 py-2.5 text-sm space-y-1">
+                                <div className="flex justify-between"><span className="text-gray-500">売れた合計</span><b>{rows.reduce((s, r) => s + r.sold, 0)}個</b></div>
+                                <div className="flex justify-between"><span className="text-gray-500">ロス（回収）</span><b className="text-red-500">{rows.reduce((s, r) => s + r.loss, 0)}個</b></div>
+                                <div className="flex justify-between pt-1 border-t border-gray-100"><span className="text-gray-500">ご請求（手数料{Math.round(a.feeRate * 100)}%を引いた額・税込）</span><b className="text-lg">¥{billing.toLocaleString()}</b></div>
+                            </div>
+                            <button type="button" onClick={submit} disabled={isSubmittingDelivery} className={`mt-3 w-full py-3.5 rounded-xl text-white font-bold flex justify-center items-center gap-2 ${isSubmittingDelivery ? 'bg-gray-300' : 'bg-orange-500'}`}>{isSubmittingDelivery ? <><div className="spinner"></div> 記録中…</> : 'まとめて精算して、精算明細書を出す'}</button>
+                        </>);
+                    })()}
+
+                    {deliveryDone && sheetWrap(() => setDeliveryDone(null), <>
+                        <div className="text-center py-2"><div className="w-14 h-14 rounded-full bg-nanairo-dark text-white text-3xl flex items-center justify-center mx-auto">✓</div><h3 className="text-lg font-bold text-gray-900 mt-2">{deliveryDone.agency.name} に納品しました</h3><p className="text-xs text-gray-500">{shortDate(deliveryDone.date)}・{deliveryDone.items.length}商品 {deliveryDone.items.reduce((s, i) => s + i.qty, 0)}個</p></div>
+                        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 text-sm mt-2">{deliveryDone.items.map(i => <div key={i.productId} className="flex justify-between px-3 py-2"><span>{i.productName}</span><b>{i.qty}</b></div>)}</div>
+                        <div className="mt-4 space-y-2 font-bold">
+                            <button type="button" onClick={() => { setPrintOrders([deliveryDone.invoiceData]); setPrintType('agency_invoice'); setDeliveryDone(null); }} className="w-full py-3.5 rounded-xl bg-nanairo-dark text-white">🖨 納品書を印刷・PDF保存</button>
+                            <button type="button" onClick={() => setDeliveryDone(null)} className="w-full py-3 rounded-xl bg-gray-100 text-gray-700">あとで（履歴からいつでも出せます）</button>
+                        </div>
+                    </>)}
+
+                    {batchMenu && (() => {
+                        const a = agencies.find(x => x.id === batchMenu.agencyId);
+                        const b = a ? agencyStats(a).batchList.find(x => x.key === batchMenu.key) : null;
+                        if (!b) return null;
+                        const settled = b.items.filter(d => d.status === '精算済');
+                        const pending = b.items.filter(d => d.status === '納品済');
+                        const close = () => setBatchMenu(null);
+                        const runAll = async (action, list, msg) => {
+                            try { for (const d of list) await postAdmin({ action, rowIndex: d.rowIndex }); showMessage(msg); }
+                            catch (e) { showMessage('取り消せませんでした: ' + e.message, 7000); }
+                            fetchData(viewStartMonth, viewEndMonth);
+                        };
+                        const item = (label, onClick, cls = '', disabledReason = null) => (
+                            <button type="button" disabled={!!disabledReason} onClick={onClick} className={`w-full text-left px-4 py-3 ${disabledReason ? 'text-gray-300' : cls}`}>{label}{disabledReason && <span className="block text-[11px]">{disabledReason}</span>}</button>
+                        );
+                        return sheetWrap(close, <>
+                            <b className="text-gray-900">{shortDate(b.date)} の納品</b>
+                            <div className="text-xs text-gray-500">{b.items.map(d => `${d.productName}${d.deliveryQty}`).join('・')}</div>
+                            <div className="bg-white rounded-2xl border border-gray-200 mt-3 divide-y divide-gray-100 text-sm">
+                                {item('🖨 納品書を再発行', () => { printAgencyDoc(a, b.items, 'deliver'); close(); })}
+                                {settled.length > 0 && item('🖨 精算明細書', () => { printAgencyDoc(a, settled, 'settle'); close(); })}
+                                {settled.length > 0 && item('↩ 精算を取り消す（未精算に戻す）', () => { close(); setConfirmSheet({ title: '精算を取り消しますか？', body: '未精算の状態に戻ります。売上から外れ、回収したロスも元に戻ります。', rows: settled.map(d => [d.productName, `売れた${d.salesQty}・ロス${d.lossQty}`]), confirmLabel: '精算を取り消す', danger: true, onConfirm: () => runAll('cancelAgencyInventory', settled, '精算を取り消しました') }); }, 'text-red-600')}
+                                {item('↩ 納品を取り消す（在庫に戻す）', () => { close(); setConfirmSheet({ title: '納品を取り消しますか？', body: '納品した商品は在庫に戻ります。', rows: pending.map(d => [d.productName, `${d.deliveryQty}個`]), confirmLabel: '納品を取り消す', danger: true, onConfirm: () => runAll('cancelAgencyDelivery', pending, '納品を取り消して、在庫に戻しました') }); }, 'text-red-600', settled.length ? '精算済みの商品があるため不可（先に精算を取り消してください）' : null)}
+                            </div>
+                            <button type="button" onClick={close} className="w-full mt-3 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold">閉じる</button>
+                        </>);
+                    })()}
+
+                    {renderConfirmSheet()}
+
+                    {toast && (
+                        <div key={toast.id} className="no-print fixed left-3 right-3 lg:left-auto lg:right-6 lg:w-[420px] bottom-[88px] lg:bottom-6 z-[80] mx-auto max-w-[560px] bg-gray-900 text-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-xl animate-slide-up">
+                            <span className="text-lg">✓</span>
+                            <div className="flex-1 min-w-0 text-sm"><b>{toast.text}</b>{toast.sub && <div className="text-[11px] text-gray-300">{toast.sub}</div>}</div>
+                            {toast.undo && <button type="button" onClick={() => { const u = toast.undo; setToast(null); u(); }} className="text-sm font-bold text-nanairo shrink-0">取り消す</button>}
+                            <button type="button" onClick={() => setToast(null)} className="text-gray-400 shrink-0" aria-label="閉じる"><Icons.X className="w-4 h-4" /></button>
                         </div>
                     )}
                 </div>

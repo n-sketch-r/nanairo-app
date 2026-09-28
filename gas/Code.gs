@@ -394,8 +394,8 @@ function doPost(e) {
   try {
     if (action === "order") response = Object.assign(response, processNewOrder(data));
     else if (action === "saveProfile") response.profile = saveCustomer(data, verified);
-    else if (action === "stockUpdate") processStockAdjustment(data);
-    else if (action === "bulkLoss") processBulkLoss(data);
+    else if (action === "stockUpdate") response.logRow = processStockAdjustment(data);
+    else if (action === "bulkLoss") response.logRows = processBulkLoss(data);
     else if (action === "cancelStockLog") processCancelStockLog(data);
     else if (action === "statusUpdate") processStatusChange(data);
     else if (action === "cancelOrder") processCancelOrder(data);
@@ -632,7 +632,7 @@ function fetchStockLogs() {
       rowIndex: i + 1, date: formattedDate, productId: String(row[1] || ""), name: nameMap[String(row[1] || "")] || "不明",
       type: String(row[2] || ""), amount: Number(row[3] || 0), memo: String(row[4] || ""), status: String(row[5] || "")
     });
-    if (logs.length >= 30) break;
+    if (logs.length >= 80) break;
   }
   return logs;
 }
@@ -1186,6 +1186,7 @@ function processStockAdjustment(data) {
   if (!updateStockById(data.productId, diff)) throw new Error("商品が見つかりません。");
   SHEET_STOCK_LOGS.appendRow([ new Date(), data.productId, typeLabel, amount, data.memo || "", "" ]);
   clearProductsCache();
+  return SHEET_STOCK_LOGS.getLastRow();
 }
 
 function processBulkLoss(data) {
@@ -1193,14 +1194,17 @@ function processBulkLoss(data) {
   const products = fetchProducts();
   const memo = data.memo || "一括ロス";
   const now = new Date();
+  const rows = [];
 
   products.forEach(p => {
     if (p.stock > 0) {
       updateStockById(p.id, -p.stock);
       SHEET_STOCK_LOGS.appendRow([ now, p.id, "ロス", p.stock, memo, "" ]);
+      rows.push(SHEET_STOCK_LOGS.getLastRow());
     }
   });
   clearProductsCache();
+  return rows;
 }
 
 function processCancelStockLog(data) {
