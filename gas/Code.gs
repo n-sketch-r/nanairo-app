@@ -1415,21 +1415,57 @@ function enqueuePrint(kind, lines, orderId) {
   printSheet().appendRow(["P" + Date.now().toString(36) + Math.floor(Math.random() * 1000), new Date(), kind, orderId || "", JSON.stringify(lines), "未", ""]);
 }
 
-// 注文票の中身（1行ずつ [書式, 文字]。書式は big=大きく / bold=太字 / normal / hr=区切り線）
+// 注文票の中身（1行ずつ [書式, 文字]）
+// 書式：big=大きく / bold=太字 / normal / hr=区切り線 / rev=白黒反転の見出し / center=中央
+// ※rev・center を知らない古いSurfaceでは普通の文字で出る（内容は欠けない）
+const PRINT_COLS = 42; // 1行の文字数（半角）。大きい文字はこの半分
+function printWidth(t) {
+  let w = 0;
+  for (const ch of String(t)) w += /[\u0020-\u007e\u00a5\uff61-\uff9f]/.test(ch) ? 1 : 2;
+  return w;
+}
+// 左右に振り分けた1行（入りきらないときは間を1マスだけ空ける）
+function printRow(left, right, cols) {
+  const gap = cols - printWidth(left) - printWidth(right);
+  return left + " ".repeat(Math.max(1, gap)) + right;
+}
 function buildOrderPrintLines(kind, o) {
   const isDel = o.deliveryMethod === METHOD_DELIVERY;
-  const head = { "new": "【新規注文】", "cancel": "【キャンセル】", "reprint": "【注文票・再印刷】" }[kind] || "【注文票】";
-  const L = [["big", head], ["bold", isDel ? "配送" : "店頭受取"], ["big", `${jpDate(o.pickupDate)} ${timeLabel(o.pickupTime)}`]];
-  L.push(["bold", o.storeName ? `${o.storeName}（${o.userName} 様）` : `${o.userName} 様`]);
-  if (o.phone) L.push(["normal", "電話 " + o.phone]);
+  const isCancel = kind === "cancel";
+  const big = Math.floor(PRINT_COLS / 2);
+  const no = "No." + String(o.id).slice(-4).toUpperCase();
+  const L = [["center", "マイクロハーブ 注文票"]];
+  L.push(["rev", { "new": "新規注文", "cancel": "キャンセル", "reprint": "注文票（再印刷）" }[kind] || "注文票"]);
+  if (isCancel) L.push(["bold", "この注文は作らないでください"]);
+  L.push(["bold", isDel ? "配送" : "店頭受取"]);
+  L.push(["big", jpDate(o.pickupDate)]);
+  L.push(["big", timeLabel(o.pickupTime)]);
+  L.push(["hr", ""]);
+  if (o.storeName) { L.push(["big", o.storeName]); L.push(["normal", `${o.userName} 様${o.phone ? "　" + o.phone : ""}`]); }
+  else { L.push(["big", `${o.userName} 様`]); if (o.phone) L.push(["normal", o.phone]); }
   if (isDel && o.address) L.push(["normal", "住所 " + o.address]);
   L.push(["hr", ""]);
-  (o.itemsList || []).forEach(it => L.push(["bold", `${it.name}　× ${it.qty}`]));
+  let count = 0;
+  (o.itemsList || []).forEach(it => {
+    count += Number(it.qty) || 0;
+    if (isCancel) L.push(["normal", `（取消）${it.name} ×${it.qty}`]);
+    else L.push(["big", printRow(it.name, "×" + it.qty, big)]);
+  });
   L.push(["hr", ""]);
-  L.push(["bold", `合計 ¥${Number(o.totalPrice || 0).toLocaleString()}（現金）${o.shippingFee > 0 ? `　送料¥${o.shippingFee}込` : ""}`]);
+  if (isCancel) {
+    L.push(["normal", "在庫は自動で戻しました"]);
+    L.push(["bold", "先に出た注文票は捨ててください"]);
+    L.push(["normal", `${no}　${Utilities.formatDate(new Date(), "Asia/Tokyo", "M/d HH:mm")} キャンセル`]);
+    return L;
+  }
+  L.push(["bold", `計 ${count}パック`]);
+  L.push(["big", printRow("お会計", "¥" + Number(o.totalPrice || 0).toLocaleString(), big)]);
+  L.push(["normal", (isDel ? "配達時に現金" : "受け取り時に現金") + (o.shippingFee > 0 ? `（送料¥${o.shippingFee}込）` : "")]);
   if (o.memo && o.memo !== "なし") L.push(["normal", "備考 " + o.memo]);
-  if (kind === "cancel") L.push(["bold", "※在庫は自動で戻しました"]);
-  L.push(["normal", "注文 " + o.orderDate]);
+  L.push(["hr", ""]);
+  L.push(["bold", isDel ? "□準備　□積み込み　□配達・集金" : "□準備　□お渡し　□集金"]);
+  const od = String(o.orderDate).match(/^\d{4}-(\d{2})-(\d{2})\s*(.*)$/);
+  L.push(["normal", `${no}　${od ? `${Number(od[1])}/${Number(od[2])} ${od[3]}` : o.orderDate} 受付`]);
   return L;
 }
 

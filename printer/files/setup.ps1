@@ -48,6 +48,20 @@ try {
     $ConfigPath = Join-Path $InstallDir 'config.json'
     $LogPath = Join-Path $InstallDir 'print.log'
 
+    # すでに設定済みなら、プログラムだけ新しくできる（テスト印刷やパスワードは不要）
+    if (Test-Path $ConfigPath) {
+        $u = Ask '前の設定が残っています。 1=プログラムだけ新しくする（おすすめ） 2=最初から設定し直す' @('1', '2')
+        if ($u -eq '1') {
+            Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like '*MicroherbPrint*print.ps1*' } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force } catch {} }
+            $ps1 = Join-Path $InstallDir 'print.ps1'
+            $arg = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ps1 + '"'
+            try { Start-ScheduledTask -TaskName 'MicroherbPrint' } catch { Start-Process -FilePath 'powershell.exe' -ArgumentList $arg -WindowStyle Hidden }
+            Write-Host ''
+            Write-Host '  → プログラムを新しくしました。設定（プリンター・合言葉）はそのままです。' -ForegroundColor Green
+            return
+        }
+    }
+
     # ---- 2. キッチンのプリンターを探す ----
     Write-Host '[1/4] キッチンのプリンターを探します' -ForegroundColor Cyan
     Write-Host '      テスト印刷をするので、キッチンのプリンターのそばで見ていてください。'

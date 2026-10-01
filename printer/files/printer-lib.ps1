@@ -53,15 +53,17 @@ function Get-RawBytes($lines) {
         $style = [string]$ln[0]
         $t = Fix-Text ([string]$ln[1])
         if ($style -eq 'hr') { $t = '-' * 40 }
-        $size = 0; $kanji = 0; $em = 0
+        $size = 0; $kanji = 0; $em = 0; $rev = 0; $align = 0
         if ($style -eq 'big') { $size = 0x11; $kanji = 0x0C; $em = 1 }
         elseif ($style -eq 'bold') { $em = 1 }
-        $buf.AddRange([byte[]](0x1D, 0x21, $size, 0x1C, 0x21, $kanji, 0x1B, 0x45, $em))
+        elseif ($style -eq 'rev') { $size = 0x11; $kanji = 0x0C; $em = 1; $rev = 1; $align = 1; $t = '  ' + $t + '  ' }
+        elseif ($style -eq 'center') { $align = 1 }
+        $buf.AddRange([byte[]](0x1D, 0x21, $size, 0x1C, 0x21, $kanji, 0x1B, 0x45, $em, 0x1D, 0x42, $rev, 0x1B, 0x61, $align))
         $buf.AddRange([byte[]]$enc.GetBytes($t))
         $buf.Add([byte]0x0A)
     }
     # 元に戻す / 4行送る / 紙を切る
-    $buf.AddRange([byte[]](0x1D, 0x21, 0, 0x1C, 0x21, 0, 0x1B, 0x45, 0, 0x1B, 0x64, 4, 0x1D, 0x56, 0x42, 0))
+    $buf.AddRange([byte[]](0x1D, 0x21, 0, 0x1C, 0x21, 0, 0x1B, 0x45, 0, 0x1D, 0x42, 0, 0x1B, 0x61, 0, 0x1B, 0x64, 4, 0x1D, 0x56, 0x42, 0))
     return , $buf.ToArray()
 }
 
@@ -87,10 +89,13 @@ function Send-Epos([string]$ip, $lines) {
         $style = [string]$ln[0]
         $t = [Security.SecurityElement]::Escape((Fix-Text ([string]$ln[1])))
         if ($style -eq 'hr') { $t = '-' * 40 }
-        $attr = 'width="1" height="1" em="false"'
-        if ($style -eq 'big') { $attr = 'width="2" height="2" em="true"' }
-        elseif ($style -eq 'bold') { $attr = 'width="1" height="1" em="true"' }
-        [void]$sb.Append("<text $attr>$t&#10;</text>")
+        $attr = 'width="1" height="1" em="false" reverse="false"'
+        $align = 'left'
+        if ($style -eq 'big') { $attr = 'width="2" height="2" em="true" reverse="false"' }
+        elseif ($style -eq 'bold') { $attr = 'width="1" height="1" em="true" reverse="false"' }
+        elseif ($style -eq 'rev') { $attr = 'width="2" height="2" em="true" reverse="true"'; $align = 'center'; $t = '  ' + $t + '  ' }
+        elseif ($style -eq 'center') { $align = 'center' }
+        [void]$sb.Append("<text align=`"$align`"/><text $attr>$t&#10;</text>")
     }
     [void]$sb.Append('<feed line="3"/><cut type="feed"/></epos-print></s:Body></s:Envelope>')
     $wc = New-Object Net.WebClient
