@@ -300,7 +300,7 @@ function buildAdminData(data) {
     agencyDeliveriesAll: fetchAgencyDeliveries(),
     insights: buildInsights(allOrders, targetMonth, endMonth),
     customers: fetchCustomerRecords(),
-    system: { lineQuota: getLineQuota(), lastBackupAt: PROPS.getProperty("LAST_BACKUP_AT") || "", lastPushError: PROPS.getProperty("LAST_PUSH_ERROR") || "" },
+    system: { lineQuota: getLineQuota(), lastBackupAt: PROPS.getProperty("LAST_BACKUP_AT") || "", lastPushError: PROPS.getProperty("LAST_PUSH_ERROR") || "", printer: printerStatus() },
     settings: getSettings()
   };
 }
@@ -344,13 +344,15 @@ function doPost(e) {
   const action = data.action || "order";
   const ADMIN_ACTIONS = ["getAdminData", "stockUpdate", "bulkLoss", "cancelStockLog", "statusUpdate", "toggleCheck",
     "agencyDelivery", "agencyInventory", "cancelAgencyDelivery", "cancelAgencyInventory", "checkAdmin",
-    "saveProduct", "saveAgency", "saveMemo", "saveSettings", "uploadProductImage", "backupNow"];
+    "saveProduct", "saveAgency", "saveMemo", "saveSettings", "uploadProductImage", "backupNow", "printTest", "printOrder", "printPair"];
   const CUSTOMER_ACTIONS = ["order", "cancelOrder", "getUserOrders", "getProfile", "saveProfile"];
+  const PRINT_ACTIONS = ["printJobs", "printDone"]; // カフェのSurfaceの印刷プログラムが使う
 
   // --- 認証 ---
   let verified = false;
   try {
     if (ADMIN_ACTIONS.indexOf(action) > -1) requireAdmin(data);
+    else if (PRINT_ACTIONS.indexOf(action) > -1) requirePrintKey(data);
     else if (CUSTOMER_ACTIONS.indexOf(action) > -1) {
       const user = verifyLineUser(data);
       data.userId = user.userId;            // 画面から送られたIDは信用せず、LINEで確認したIDに置き換える
@@ -364,6 +366,7 @@ function doPost(e) {
   // --- 読み取り専用（ロック不要） ---
   try {
     if (action === "checkAdmin") return jsonOut({ status: "success" });
+    if (action === "printJobs") return jsonOut({ status: "success", jobs: fetchPrintJobs() });
     if (action === "getAdminData") return jsonOut(buildAdminData(data));
     if (action === "getProfile") {
       // 本人確認が取れたときだけ登録情報を返す
@@ -412,6 +415,10 @@ function doPost(e) {
     else if (action === "saveSettings") response.settings = saveSettings(data);
     else if (action === "uploadProductImage") response.imageUrl = uploadProductImage(data);
     else if (action === "backupNow") response.backup = backupSpreadsheet();
+    else if (action === "printDone") markPrintDone(data);
+    else if (action === "printTest") enqueuePrint("test", [["big", "【テスト印刷】"], ["normal", "管理画面から送ったテストです"], ["normal", Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm")]], "");
+    else if (action === "printOrder") enqueueOrderPrint("reprint", data.orderId);
+    else if (action === "printPair") response.printKey = newPrintKey();
     else throw new Error("不明なアクションが指定されました: " + action);
   } catch (err) {
     response = { status: "error", message: err.toString() };
@@ -1007,6 +1014,8 @@ function processNewOrder(data) {
     pushLineMessageToGroup(groupMsg);
   }
 
+  try { enqueueOrderPrint("new", orderId); } catch (e) { console.error("印刷待ちに入れられませんでした", e); }
+
   return { orderId: orderId, totalPrice: totalPrice, shippingFee: shippingFee, subtotal: subtotal };
 }
 
@@ -1181,6 +1190,7 @@ function processCancelOrder(data) {
     const cancelMsg = `❌【キャンセル・${methodLabel === "配送" ? "配送" : "店頭受取"}】\n${who}\n📅 ${jpDate(pickupDate)} ${timeLabel(pickupTime)}\n\n${itemLines(itemsStr)}\n\n※在庫は自動で戻しました。準備済みの分があれば店頭在庫に回してください。`;
     pushLineMessageToGroup(cancelMsg);
   }
+  try { enqueueOrderPrint("cancel", data.orderId); } catch (e) { console.error("印刷待ちに入れられませんでした", e); }
 }
 
 function processStockAdjustment(data) {
@@ -1373,6 +1383,98 @@ function uploadProductImage(data) {
   SHEET_PRODUCTS.getRange(rowNum, COL_PROD_IMAGE + 1).setValue(url);
   clearProductsCache();
   return url;
+}
+
+/* ===== ★注文票の自動印刷（カフェのSurfaceが1分ごとに取りに来る） =====
+ * PrintQueue シート：A ジョブID / B 作成日時 / C 種類 / D 注文ID / E 内容(JSON) / F 状態(未・済) / G 印刷日時
+ * スクリプトプロパティ PRINT_KEY：Surfaceの印刷プログラムと同じ合言葉
+ *   Surfaceの設定プログラムが、管理画面のパスワードを使って printPair で受け取る（作り直すと前のSurfaceは使えなくなる）
+ */
+function newPrintKey() {
+  const key = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, "");
+  PROPS.setProperty("PRINT_KEY", key);
+  printSheet();
+  return key;
+}
+
+function requirePrintKey(data) {
+  const key = String(PROPS.getProperty("PRINT_KEY") || "");
+  if (key.length < 20 || String((data && data.printKey) || "") !== key) { Utilities.sleep(500); throw new Error("PRINT_KEY_INVALID"); }
+}
+
+function printSheet() {
+  let sh = SS.getSheetByName("PrintQueue");
+  if (!sh) {
+    sh = SS.insertSheet("PrintQueue");
+    sh.getRange(1, 1, 1, 7).setValues([["ジョブID", "作成日時", "種類", "注文ID", "内容", "状態", "印刷日時"]]);
+  }
+  return sh;
+}
+
+function enqueuePrint(kind, lines, orderId) {
+  printSheet().appendRow(["P" + Date.now().toString(36) + Math.floor(Math.random() * 1000), new Date(), kind, orderId || "", JSON.stringify(lines), "未", ""]);
+}
+
+// 注文票の中身（1行ずつ [書式, 文字]。書式は big=大きく / bold=太字 / normal / hr=区切り線）
+function buildOrderPrintLines(kind, o) {
+  const isDel = o.deliveryMethod === METHOD_DELIVERY;
+  const head = { "new": "【新規注文】", "cancel": "【キャンセル】", "reprint": "【注文票・再印刷】" }[kind] || "【注文票】";
+  const L = [["big", head], ["bold", isDel ? "配送" : "店頭受取"], ["big", `${jpDate(o.pickupDate)} ${timeLabel(o.pickupTime)}`]];
+  L.push(["bold", o.storeName ? `${o.storeName}（${o.userName} 様）` : `${o.userName} 様`]);
+  if (o.phone) L.push(["normal", "電話 " + o.phone]);
+  if (isDel && o.address) L.push(["normal", "住所 " + o.address]);
+  L.push(["hr", ""]);
+  (o.itemsList || []).forEach(it => L.push(["bold", `${it.name}　× ${it.qty}`]));
+  L.push(["hr", ""]);
+  L.push(["bold", `合計 ¥${Number(o.totalPrice || 0).toLocaleString()}（現金）${o.shippingFee > 0 ? `　送料¥${o.shippingFee}込` : ""}`]);
+  if (o.memo && o.memo !== "なし") L.push(["normal", "備考 " + o.memo]);
+  if (kind === "cancel") L.push(["bold", "※在庫は自動で戻しました"]);
+  L.push(["normal", "注文 " + o.orderDate]);
+  return L;
+}
+
+function enqueueOrderPrint(kind, orderId) {
+  const o = fetchOrders().find(x => x.id === String(orderId));
+  if (!o) throw new Error("注文が見つかりません。");
+  enqueuePrint(kind, buildOrderPrintLines(kind, o), o.id);
+}
+
+// Surfaceが取りに来る：まだ印刷していないもの（古い順・最大10件）
+function fetchPrintJobs() {
+  PROPS.setProperty("LAST_PRINTER_SEEN", new Date().toISOString());
+  const sh = printSheet();
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const start = Math.max(2, last - 199); // 直近200件だけ見る（軽くするため）
+  const v = sh.getRange(start, 1, last - start + 1, 7).getValues();
+  return v.filter(r => r[5] === "未").slice(0, 10).map(r => ({ id: String(r[0]), kind: String(r[2]), lines: JSON.parse(String(r[4]) || "[]") }));
+}
+
+function markPrintDone(data) {
+  const ids = Array.isArray(data.ids) ? data.ids.map(String) : (data.ids ? [String(data.ids)] : []); // 1件だけのときは文字で届くことがある
+  if (!ids.length) return;
+  const sh = printSheet();
+  const last = sh.getLastRow();
+  if (last < 2) return;
+  const start = Math.max(2, last - 199);
+  const rng = sh.getRange(start, 1, last - start + 1, 7);
+  const v = rng.getValues();
+  const now = new Date();
+  v.forEach(r => { if (ids.indexOf(String(r[0])) > -1) { r[5] = "済"; r[6] = now; } });
+  rng.setValues(v);
+}
+
+// 管理画面の「システムの状態」用
+function printerStatus() {
+  try {
+    const sh = SS.getSheetByName("PrintQueue");
+    let pending = 0;
+    if (sh && sh.getLastRow() >= 2) {
+      const last = sh.getLastRow(), start = Math.max(2, last - 199);
+      pending = sh.getRange(start, 6, last - start + 1, 1).getValues().filter(r => r[0] === "未").length;
+    }
+    return { lastSeen: PROPS.getProperty("LAST_PRINTER_SEEN") || "", pending: pending, keySet: String(PROPS.getProperty("PRINT_KEY") || "").length >= 20 };
+  } catch (e) { return null; }
 }
 
 // ★初回だけエディタから実行：写真の列を作り、送信数チェック（毎朝9時）と自動バックアップ（毎週月曜3時）を設定する

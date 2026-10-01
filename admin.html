@@ -926,6 +926,9 @@
                         {c && <button type="button" onClick={() => { setSelectedOrderId(null); setActiveTab('customers'); setSelectedCustomerKey(c.key); }} className="w-full text-right text-xs font-bold text-nanairo-dark">このお客様の台帳を開く ›</button>}
                         {next && <button type="button" onClick={() => setOrderStatus(order, next[0])} className="w-full rounded-xl py-3.5 bg-nanairo-dark text-white font-bold active:opacity-90">{next[1]}</button>}
                         {!isCancelled && cur > 0 && <button type="button" onClick={() => setOrderStatus(order, steps[cur - 1][0])} className="w-full text-center text-xs text-gray-400 underline">ひとつ前の状態に戻す</button>}
+                        {systemInfo && systemInfo.printer && systemInfo.printer.keySet && (
+                            <button type="button" onClick={async () => { try { await postAdmin({ action: 'printOrder', orderId: order.id }); showMessage('カフェのプリンターに送りました（1分ほどで出てきます）'); } catch (e) { showMessage('送れませんでした: ' + e.message, 7000); } }} className="w-full text-center text-xs text-gray-500 underline">🖨 カフェのプリンターで注文票を印刷</button>
+                        )}
                     </div>
                 );
             };
@@ -1387,6 +1390,29 @@
                                 <div><div className="font-bold text-gray-800">🗂 自動バックアップ</div><div className="text-[11px] text-gray-500">毎週月曜の朝に保存（最新8回分）。{backupAt ? `最後：${new Date(backupAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'まだ保存されていません'}</div></div>
                                 <button type="button" onClick={runBackup} disabled={isSavingAdmin} className="text-xs font-bold text-nanairo-dark border border-nanairo-dark rounded-full px-3 py-1.5 shrink-0">{isSavingAdmin ? '保存中…' : '今すぐ保存'}</button>
                             </div>
+                            {(() => {
+                                // カフェのSurface（注文票の自動印刷）の様子
+                                const pr = systemInfo && systemInfo.printer;
+                                const seen = pr && pr.lastSeen ? new Date(pr.lastSeen) : null;
+                                const mins = seen ? Math.round((Date.now() - seen.getTime()) / 60000) : null;
+                                const hour = new Date().getHours();
+                                const open = hour >= 7 && hour < 20;
+                                const state = !pr ? ['—', 'text-gray-500', 'GASを最新版にすると表示されます。']
+                                    : !pr.keySet ? ['まだ設定されていません', 'text-gray-500', 'カフェのSurfaceで setup.bat を実行すると動き始めます。']
+                                    : mins != null && mins <= 3 ? ['動いています', 'text-nanairo-dark', `最終確認 ${seen.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`]
+                                    : !open ? ['お休み中（7時〜20時に動きます）', 'text-gray-500', seen ? `最終確認 ${seen.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '']
+                                    : ['止まっているかも', 'text-red-600', `${seen ? `最終確認 ${seen.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}。` : ''}Surfaceの電源・スリープ・サインインを確認してください。`];
+                                const testPrint = async () => {
+                                    try { await postAdmin({ action: 'printTest' }); showMessage('テスト印刷を送りました（1分ほどで出てきます）'); }
+                                    catch (e) { showMessage('送れませんでした: ' + e.message, 7000); }
+                                };
+                                return (
+                                    <div className="px-4 py-3 flex items-center justify-between gap-2">
+                                        <div className="min-w-0"><div className="font-bold text-gray-800">🖨 注文票の自動印刷 <span className={`text-xs ${state[1]}`}>{state[0]}</span></div><div className="text-[11px] text-gray-500">{state[2]}{pr && pr.pending ? `　印刷待ち ${pr.pending}件` : ''}</div></div>
+                                        {pr && pr.keySet && <button type="button" onClick={testPrint} className="text-xs font-bold text-nanairo-dark border border-nanairo-dark rounded-full px-3 py-1.5 shrink-0">テスト印刷</button>}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 );
