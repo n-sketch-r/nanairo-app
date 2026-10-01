@@ -1417,6 +1417,7 @@ function enqueuePrint(kind, lines, orderId) {
 
 // 注文票の中身（1行ずつ [書式, 文字]）
 // 書式：big=大きく / bold=太字 / normal / hr=区切り線 / rev=白黒反転の見出し / center=中央
+// ※「¥」はプリンターによって「\」で出るので、全角の「￥」を使う
 // ※rev・center を知らない古いSurfaceでは普通の文字で出る（内容は欠けない）
 const PRINT_COLS = 42; // 1行の文字数（半角）。大きい文字はこの半分
 function printWidth(t) {
@@ -1459,8 +1460,8 @@ function buildOrderPrintLines(kind, o) {
     return L;
   }
   L.push(["bold", `計 ${count}パック`]);
-  L.push(["big", printRow("お会計", "¥" + Number(o.totalPrice || 0).toLocaleString(), big)]);
-  L.push(["normal", (isDel ? "配達時に現金" : "受け取り時に現金") + (o.shippingFee > 0 ? `（送料¥${o.shippingFee}込）` : "")]);
+  L.push(["big", printRow("お会計", "￥" + Number(o.totalPrice || 0).toLocaleString(), big)]);
+  L.push(["normal", (isDel ? "配達時に現金" : "受け取り時に現金") + (o.shippingFee > 0 ? `（送料￥${o.shippingFee}込）` : "")]);
   if (o.memo && o.memo !== "なし") L.push(["normal", "備考 " + o.memo]);
   L.push(["hr", ""]);
   L.push(["bold", isDel ? "□準備　□積み込み　□配達・集金" : "□準備　□お渡し　□集金"]);
