@@ -44,34 +44,40 @@ function Fix-Text([string]$t) {
 }
 
 # 直接送る方法（ESC/POS・ポート9100）用のデータを作る
-function Get-RawBytes($lines) {
+# 行の高さなどは 1/180 インチ単位（はじめに GS P で単位をそろえる）
+function Get-RawBytes($lines, [bool]$beep) {
     $enc = [Text.Encoding]::GetEncoding(932)
     $buf = New-Object 'System.Collections.Generic.List[byte]'
-    # 初期化 / 漢字コード=Shift_JIS / 漢字モード
-    $buf.AddRange([byte[]](0x1B, 0x40, 0x1B, 0x52, 0x08, 0x1C, 0x43, 0x01, 0x1C, 0x26))
+    # 初期化 / 単位=1/180インチ / 国際文字=日本（￥） / 漢字コード=Shift_JIS / 漢字モード
+    $buf.AddRange([byte[]](0x1B, 0x40, 0x1D, 0x50, 180, 180, 0x1B, 0x52, 0x08, 0x1C, 0x43, 0x01, 0x1C, 0x26))
     foreach ($ln in $lines) {
         $style = [string]$ln[0]
         $t = Fix-Text ([string]$ln[1])
-        if ($style -eq 'hr') { $t = '-' * 40 }
-        $size = 0; $kanji = 0; $em = 0; $rev = 0; $align = 0; $lsp = 34; $pre = 0
-        if ($style -eq 'big') { $size = 0x11; $kanji = 0x0C; $em = 1; $lsp = 62 }
+        if ($style -eq 'hr' -and -not $t) { $t = '-' * 48 }
+        # size=倍角 / kanji=漢字の倍角 / em=太字 / rev=反転 / align=寄せ / lsp=行の高さ / pre=上の余白
+        $size = 0; $kanji = 0; $em = 0; $rev = 0; $align = 0; $lsp = 36; $pre = 0
+        if ($style -eq 'big') { $size = 0x11; $kanji = 0x0C; $em = 1; $lsp = 64; $pre = 4 }
+        elseif ($style -eq 'tall') { $size = 0x01; $kanji = 0x08; $em = 1; $lsp = 60; $pre = 4 }
         elseif ($style -eq 'bold') { $em = 1 }
-        elseif ($style -eq 'rev') { $size = 0x11; $kanji = 0x0C; $em = 1; $rev = 1; $align = 1; $t = '  ' + $t + '  '; $lsp = 72; $pre = 6 }
-        elseif ($style -eq 'center') { $align = 1 }
-        elseif ($style -eq 'hr') { $pre = 10; $lsp = 44 }
+        elseif ($style -eq 'rev') { $size = 0x11; $kanji = 0x0C; $em = 1; $rev = 1; $align = 1; $t = '  ' + $t + '  '; $lsp = 76 }
+        elseif ($style -eq 'center') { $align = 1; $pre = 8 }
+        elseif ($style -eq 'hr') { $pre = 14; $lsp = 50 }
         if ($pre -gt 0) { $buf.AddRange([byte[]](0x1B, 0x4A, $pre)) }
-        # 行の高さ（文字の高さ＋すき間）をそろえて、詰まって見えないようにする
         $buf.AddRange([byte[]](0x1B, 0x33, $lsp, 0x1D, 0x21, $size, 0x1C, 0x21, $kanji, 0x1B, 0x45, $em, 0x1D, 0x42, $rev, 0x1B, 0x61, $align))
         $buf.AddRange([byte[]]$enc.GetBytes($t))
         $buf.Add([byte]0x0A)
     }
     # 元に戻す / 4行送る / 紙を切る
-    $buf.AddRange([byte[]](0x1D, 0x21, 0, 0x1C, 0x21, 0, 0x1B, 0x45, 0, 0x1D, 0x42, 0, 0x1B, 0x61, 0, 0x1B, 0x64, 4, 0x1D, 0x56, 0x42, 0))
+    $buf.AddRange([byte[]](0x1D, 0x21, 0, 0x1C, 0x21, 0, 0x1B, 0x45, 0, 0x1D, 0x42, 0, 0x1B, 0x61, 0, 0x1B, 0x32, 0x1B, 0x64, 4, 0x1D, 0x56, 0x42, 0))
+    # ブザー（引き出し用の端子に信号を送る。キッチンのブザーはここにつながっていることが多い）
+    if ($beep) {
+        for ($i = 0; $i -lt 3; $i++) { $buf.AddRange([byte[]](0x1B, 0x70, 0, 100, 100, 0x1B, 0x70, 1, 100, 100)) }
+    }
     return , $buf.ToArray()
 }
 
-function Send-Raw([string]$ip, $lines) {
-    $bytes = Get-RawBytes $lines
+function Send-Raw([string]$ip, $lines, [bool]$beep = $false) {
+    $bytes = Get-RawBytes $lines $beep
     $c = New-Object Net.Sockets.TcpClient
     try {
         $ar = $c.BeginConnect($ip, 9100, $null, $null)
@@ -85,25 +91,26 @@ function Send-Raw([string]$ip, $lines) {
 }
 
 # プリンターのWeb印刷機能（ePOS-Print）で送る方法
-function Send-Epos([string]$ip, $lines) {
+function Send-Epos([string]$ip, $lines, [bool]$beep = $false) {
     $sb = New-Object Text.StringBuilder
     [void]$sb.Append('<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print"><text lang="ja"/>')
     foreach ($ln in $lines) {
         $style = [string]$ln[0]
         $t = [Security.SecurityElement]::Escape((Fix-Text ([string]$ln[1])))
-        if ($style -eq 'hr') { $t = '-' * 40 }
-        $attr = 'width="1" height="1" em="false" reverse="false"'
-        $align = 'left'
-        if ($style -eq 'big') { $attr = 'width="2" height="2" em="true" reverse="false"' }
-        elseif ($style -eq 'bold') { $attr = 'width="1" height="1" em="true" reverse="false"' }
-        elseif ($style -eq 'rev') { $attr = 'width="2" height="2" em="true" reverse="true"'; $align = 'center'; $t = '  ' + $t + '  ' }
-        elseif ($style -eq 'center') { $align = 'center' }
-        $lsp = 34
-        if ($style -eq 'big') { $lsp = 62 } elseif ($style -eq 'rev') { $lsp = 72 } elseif ($style -eq 'hr') { $lsp = 44 }
-        if ($style -eq 'hr' -or $style -eq 'rev') { [void]$sb.Append('<feed unit="10"/>') }
-        [void]$sb.Append("<text align=`"$align`" linespc=`"$lsp`"/><text $attr>$t&#10;</text>")
+        if ($style -eq 'hr' -and -not $t) { $t = '-' * 48 }
+        $w = 1; $h = 1; $em = 'false'; $rev = 'false'; $align = 'left'; $lsp = 36; $pre = 0
+        if ($style -eq 'big') { $w = 2; $h = 2; $em = 'true'; $lsp = 64; $pre = 4 }
+        elseif ($style -eq 'tall') { $h = 2; $em = 'true'; $lsp = 60; $pre = 4 }
+        elseif ($style -eq 'bold') { $em = 'true' }
+        elseif ($style -eq 'rev') { $w = 2; $h = 2; $em = 'true'; $rev = 'true'; $align = 'center'; $t = '  ' + $t + '  '; $lsp = 76 }
+        elseif ($style -eq 'center') { $align = 'center'; $pre = 8 }
+        elseif ($style -eq 'hr') { $pre = 14; $lsp = 50 }
+        if ($pre -gt 0) { [void]$sb.Append("<feed unit=`"$pre`"/>") }
+        [void]$sb.Append("<text align=`"$align`" linespc=`"$lsp`"/><text width=`"$w`" height=`"$h`" em=`"$em`" reverse=`"$rev`">$t&#10;</text>")
     }
-    [void]$sb.Append('<feed line="3"/><cut type="feed"/></epos-print></s:Body></s:Envelope>')
+    [void]$sb.Append('<feed line="3"/><cut type="feed"/>')
+    if ($beep) { [void]$sb.Append('<pulse drawer="drawer_1" time="pulse_200"/><pulse drawer="drawer_2" time="pulse_200"/>') }
+    [void]$sb.Append('</epos-print></s:Body></s:Envelope>')
     $wc = New-Object Net.WebClient
     $wc.Encoding = [Text.Encoding]::UTF8
     $wc.Headers.Add('Content-Type', 'text/xml; charset=utf-8')
@@ -114,7 +121,10 @@ function Send-Epos([string]$ip, $lines) {
     if ($res -notmatch 'success="true"') { throw ('プリンターが印刷できませんでした: ' + $res) }
 }
 
+# 音を鳴らすか（config.json の beep が false なら鳴らさない）
 function Send-Job($cfg, $lines) {
-    if ($cfg.method -eq 'epos') { Send-Epos $cfg.printerIp $lines }
-    else { Send-Raw $cfg.printerIp $lines }
+    $beep = $true
+    if ($null -ne $cfg.beep) { $beep = [bool]$cfg.beep }
+    if ($cfg.method -eq 'epos') { Send-Epos $cfg.printerIp $lines $beep }
+    else { Send-Raw $cfg.printerIp $lines $beep }
 }
