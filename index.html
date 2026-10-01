@@ -351,8 +351,9 @@
             const applyCustomer = (c) => {
                 setCustomer(c);
                 if (c) {
-                    setPhone(prev => prev || c.phone);
-                    setStoreName(prev => prev || c.storeName);
+                    // 登録情報をいちばん優先する（この端末に残っている前回の入力より新しいため）
+                    if (c.phone) setPhone(c.phone); else setPhone(prev => prev || c.phone);
+                    if (c.storeName) setStoreName(c.storeName);
                 }
             };
 

@@ -16,7 +16,7 @@ while ($true) {
             if ($res.status -ne 'success') { throw ('サーバーの返事: ' + $res.message) }
             foreach ($job in @($res.jobs)) {
                 if ($null -eq $job) { continue }
-                Send-Job $cfg $job.lines
+                Send-Job $cfg $job.lines ([string]$job.kind)
                 $done = Invoke-Gas @{ action = 'printDone'; printKey = $cfg.printKey; ids = @([string]$job.id) }
                 Write-Log ('印刷しました ' + $job.id + ' ' + $job.kind)
             }

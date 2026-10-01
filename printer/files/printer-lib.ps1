@@ -45,7 +45,7 @@ function Fix-Text([string]$t) {
 
 # 直接送る方法（ESC/POS・ポート9100）用のデータを作る
 # 行の高さなどは 1/180 インチ単位（はじめに GS P で単位をそろえる）
-function Get-RawBytes($lines, [bool]$beep) {
+function Get-RawBytes($lines) {
     $enc = [Text.Encoding]::GetEncoding(932)
     $buf = New-Object 'System.Collections.Generic.List[byte]'
     # 初期化 / 単位=1/180インチ / 国際文字=日本（￥） / 漢字コード=Shift_JIS / 漢字モード
@@ -69,15 +69,10 @@ function Get-RawBytes($lines, [bool]$beep) {
     }
     # 元に戻す / 4行送る / 紙を切る
     $buf.AddRange([byte[]](0x1D, 0x21, 0, 0x1C, 0x21, 0, 0x1B, 0x45, 0, 0x1D, 0x42, 0, 0x1B, 0x61, 0, 0x1B, 0x32, 0x1B, 0x64, 4, 0x1D, 0x56, 0x42, 0))
-    # ブザー（引き出し用の端子に信号を送る。キッチンのブザーはここにつながっていることが多い）
-    if ($beep) {
-        for ($i = 0; $i -lt 3; $i++) { $buf.AddRange([byte[]](0x1B, 0x70, 0, 100, 100, 0x1B, 0x70, 1, 100, 100)) }
-    }
     return , $buf.ToArray()
 }
 
-function Send-Raw([string]$ip, $lines, [bool]$beep = $false) {
-    $bytes = Get-RawBytes $lines $beep
+function Send-Bytes([string]$ip, [byte[]]$bytes) {
     $c = New-Object Net.Sockets.TcpClient
     try {
         $ar = $c.BeginConnect($ip, 9100, $null, $null)
@@ -91,9 +86,26 @@ function Send-Raw([string]$ip, $lines, [bool]$beep = $false) {
 }
 
 # プリンターのWeb印刷機能（ePOS-Print）で送る方法
-function Send-Epos([string]$ip, $lines, [bool]$beep = $false) {
+function Send-Raw([string]$ip, $lines) {
+    Send-Bytes $ip (Get-RawBytes $lines)
+}
+
+# ePOS-Print の XML をそのまま送る
+function Send-EposXml([string]$ip, [string]$inner) {
+    $xml = '<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print">' + $inner + '</epos-print></s:Body></s:Envelope>'
+    $wc = New-Object Net.WebClient
+    $wc.Encoding = [Text.Encoding]::UTF8
+    $wc.Headers.Add('Content-Type', 'text/xml; charset=utf-8')
+    $wc.Headers.Add('SOAPAction', '""')
+    try {
+        $res = $wc.UploadString("http://$ip/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000", 'POST', $xml)
+    } finally { $wc.Dispose() }
+    if ($res -notmatch 'success="true"') { throw ('プリンターが受け付けませんでした: ' + $res) }
+}
+
+function Send-Epos([string]$ip, $lines) {
     $sb = New-Object Text.StringBuilder
-    [void]$sb.Append('<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print"><text lang="ja"/>')
+    [void]$sb.Append('<text lang="ja"/>')
     foreach ($ln in $lines) {
         $style = [string]$ln[0]
         $t = [Security.SecurityElement]::Escape((Fix-Text ([string]$ln[1])))
@@ -109,22 +121,29 @@ function Send-Epos([string]$ip, $lines, [bool]$beep = $false) {
         [void]$sb.Append("<text align=`"$align`" linespc=`"$lsp`"/><text width=`"$w`" height=`"$h`" em=`"$em`" reverse=`"$rev`">$t&#10;</text>")
     }
     [void]$sb.Append('<feed line="3"/><cut type="feed"/>')
-    if ($beep) { [void]$sb.Append('<pulse drawer="drawer_1" time="pulse_200"/><pulse drawer="drawer_2" time="pulse_200"/>') }
-    [void]$sb.Append('</epos-print></s:Body></s:Envelope>')
-    $wc = New-Object Net.WebClient
-    $wc.Encoding = [Text.Encoding]::UTF8
-    $wc.Headers.Add('Content-Type', 'text/xml; charset=utf-8')
-    $wc.Headers.Add('SOAPAction', '""')
-    try {
-        $res = $wc.UploadString("http://$ip/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000", 'POST', $sb.ToString())
-    } finally { $wc.Dispose() }
-    if ($res -notmatch 'success="true"') { throw ('プリンターが印刷できませんでした: ' + $res) }
+    Send-EposXml $ip $sb.ToString()
 }
 
-# 音を鳴らすか（config.json の beep が false なら鳴らさない）
-function Send-Job($cfg, $lines) {
-    $beep = $true
-    if ($null -ne $cfg.beep) { $beep = [bool]$cfg.beep }
-    if ($cfg.method -eq 'epos') { Send-Epos $cfg.printerIp $lines $beep }
-    else { Send-Raw $cfg.printerIp $lines $beep }
+# ブザーの鳴らし方（「音のテスト」で鳴った方法を config.json の beepMethod に覚える）
+$BeepMethods = @('epos-sound', 'esc-a', 'esc-a2', 'pulse')
+function Send-Beep([string]$ip, [string]$m, [int]$count) {
+    if ($count -lt 1) { $count = 1 }
+    switch ($m) {
+        'epos-sound' { Send-EposXml $ip ('<sound pattern="pattern_a" repeat="' + $count + '" cycle="1000"/>') }
+        'esc-a' { $b = New-Object 'System.Collections.Generic.List[byte]'; for ($i = 0; $i -lt $count; $i++) { $b.AddRange([byte[]](0x1B, 0x28, 0x41, 0x04, 0x00, 0x30, 0x33, 0x01, 0x08)) }; Send-Bytes $ip $b.ToArray() }
+        'esc-a2' { $b = New-Object 'System.Collections.Generic.List[byte]'; for ($i = 0; $i -lt $count; $i++) { $b.AddRange([byte[]](0x1B, 0x28, 0x41, 0x05, 0x00, 0x61, 0x64, 0x01, 0x05, 0x05)) }; Send-Bytes $ip $b.ToArray() }
+        'pulse' { $b = New-Object 'System.Collections.Generic.List[byte]'; for ($i = 0; $i -lt $count; $i++) { $b.AddRange([byte[]](0x1B, 0x70, 0, 100, 100, 0x1B, 0x70, 1, 100, 100)) }; Send-Bytes $ip $b.ToArray() }
+        default { }
+    }
+}
+
+# 印刷して、音を鳴らす（新規注文は1回・キャンセルは2回。音のテストをしていなければ鳴らさない）
+function Send-Job($cfg, $lines, [string]$kind = '') {
+    if ($cfg.method -eq 'epos') { Send-Epos $cfg.printerIp $lines }
+    else { Send-Raw $cfg.printerIp $lines }
+    if ($cfg.beepMethod) {
+        $n = 1
+        if ($kind -eq 'cancel') { $n = 2 }
+        try { Send-Beep $cfg.printerIp ([string]$cfg.beepMethod) $n } catch { Write-Log ('音を鳴らせませんでした: ' + $_.Exception.Message) }
+    }
 }
