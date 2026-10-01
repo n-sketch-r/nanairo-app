@@ -61,7 +61,6 @@ try {
                 try { Send-Raw $ip (Test-Lines $ip 'raw') } catch { Write-Host ('  送れませんでした: ' + $_.Exception.Message) -ForegroundColor Yellow; continue }
                 $a = Ask '  キッチンのプリンターから紙が出ましたか？ 1=出た（日本語も読める） 2=出たけど文字化け 3=出ない' @('1', '2', '3')
                 if ($a -eq '1') { $chosen = $ip; $method = 'raw'; break }
-                if ($a -eq '3') { continue }
             }
             if (Test-Port $ip 80) {
                 Write-Host '  別の方法（Web印刷機能）で送ってみます...'
