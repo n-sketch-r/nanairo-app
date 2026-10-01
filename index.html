@@ -976,7 +976,8 @@
                         const pt = DELIVERY.pickupTimes || [];
                         const pickupRange = pt.length ? `${pt[0].split('-')[0]}〜${pt[pt.length - 1].split('-')[1]}` : '';
                         const faqs = [
-                            ['はじめての登録では何を入力しますか？', <>お名前・電話番号・店舗名（会社名）の3つです。登録は最初の1回だけです。<br/>あとから変えたいときは、下の「ご注文」の一番下にある「ご登録情報の変更」から直せます。</>],
+                            ['はじめての登録では何を入力しますか？', <>お名前・電話番号・店舗名（会社名）の3つです。登録は最初の1回だけです。<br/>あとから変えたいときは、このページの一番下の「登録情報を変更する」から直せます。</>],
+                            ['お店の住所が変わりました', <>お届け先の住所は、ご注文のたびに入力する欄があります（前回の住所が自動で入ります）。次のご注文のときに、<b>お届け先の欄を新しい住所に書き直して</b>ください。</>],
                             ['受け取り方法はどう選べばいいですか？', <><b>🏪 店頭で受け取る</b>：送料はかかりません。{pickupRange && <>{pickupRange}の間で、ご来店の時間帯を選べます。</>}<br/><b>🚚 配送してもらう</b>：毎週{days}曜日の{DELIVERY.time.replace('-', '〜')}頃にお届けします。配送エリアは{DELIVERY.areas.join('・')}です。送料は¥{DELIVERY.fee.toLocaleString()}、商品合計¥{DELIVERY.freeThreshold.toLocaleString()}以上で無料です。</>],
                             ['注文の締め切りはいつですか？', <>お受け取り日・配送日の<b>前日23:59</b>までです。当日分をご希望のときは、お電話でご相談ください。</>],
                             ['お支払い方法は？', <><b>現金のみ</b>です。店頭ではお受け取りのとき、配送では配達のときにお支払いください。</>],
@@ -1016,6 +1017,14 @@
                                         {LEGAL.hours && <p className="text-xs text-stone-500 text-center -mt-1">受付時間：{LEGAL.hours}</p>}
                                         <button type="button" onClick={closeApp} className="w-full rounded-full py-3 bg-stone-100 text-stone-700 font-bold">💬 公式LINEのトークで連絡する</button>
                                     </div>
+                                    {customer && <>
+                                        <h3 className="font-black text-nanairo-dark mt-6 mb-2">ご登録情報</h3>
+                                        <div className="bg-white rounded-2xl border border-stone-200 p-4">
+                                            <p className="text-xs text-stone-500 mb-3">{customer.fullName} 様{customer.storeName ? `（${customer.storeName}）` : ''}</p>
+                                            <button type="button" onClick={() => { setShowHelp(false); openCustomerForm(customer); }} className="w-full rounded-full py-3 border border-nanairo-dark text-nanairo-dark font-bold">登録情報を変更する</button>
+                                            <p className="text-xs text-stone-500 mt-2 text-center">お名前・電話番号・店舗名を直せます</p>
+                                        </div>
+                                    </>}
                                     {LEGAL.ready && <button type="button" onClick={() => { setShowHelp(false); setShowLegal(true); }} className="block mx-auto mt-6 text-[11px] text-stone-400 underline">特定商取引法に基づく表記・個人情報の取り扱い</button>}
                                 </div>
                             </div>
