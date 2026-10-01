@@ -30,6 +30,7 @@
         }
     </script>
     <style>
+        summary::-webkit-details-marker { display: none; }
         ::-webkit-scrollbar { display: none; }
         body {
             -ms-overflow-style: none; scrollbar-width: none;
@@ -225,6 +226,7 @@
             const [loadError, setLoadError] = useState(false);        // 商品一覧が読み込めなかった
             const [bumpKey, setBumpKey] = useState(0);                // カートのボタンを弾ませる合図
             const [showLegal, setShowLegal] = useState(false);
+            const [showHelp, setShowHelp] = useState(false);
             const [showGuide, setShowGuide] = useState(() => { try { return !localStorage.getItem('nanairo_guide_seen'); } catch (e) { return false; } });
             const closeGuide = () => { setShowGuide(false); try { localStorage.setItem('nanairo_guide_seen', '1'); } catch (e) {} };
 
@@ -586,6 +588,7 @@
                                 <div className="font-black text-[17px] leading-none text-nanairo-dark">マイクロハーブ</div>
                                 <div className="text-xs text-stone-500 mt-0.5">つみたてを、そのままお届け</div>
                             </div>
+                            <button type="button" onClick={() => setShowHelp(true)} className="ml-auto flex items-center gap-1 rounded-full bg-white border border-stone-200 px-3 py-1.5 text-xs font-bold text-nanairo-dark shadow-sm"><span className="w-4 h-4 rounded-full bg-nanairo-dark text-white text-[10px] leading-4 text-center">?</span>使い方</button>
                         </div>
                         <div className="rainbow"></div>
                     </header>
@@ -751,7 +754,7 @@
                                             {customer && (
                                                 <button type="button" onClick={() => openCustomerForm(customer)} className="w-full text-xs text-stone-500 underline py-2">ご登録情報（{customer.fullName} 様）の変更</button>
                                             )}
-                                            <button type="button" onClick={() => setShowGuide(true)} className="w-full text-xs text-stone-500 underline py-2">使い方を見る</button>
+                                            <button type="button" onClick={() => setShowHelp(true)} className="w-full text-xs text-stone-500 underline py-2">使い方・よくある質問</button>
                                         </>
                                     );
                                 })()}
@@ -968,6 +971,57 @@
                         </div>
                     )}
 
+                    {showHelp && (() => {
+                        const days = DELIVERY.days.map(d => WEEK[d]).join('・');
+                        const pt = DELIVERY.pickupTimes || [];
+                        const pickupRange = pt.length ? `${pt[0].split('-')[0]}〜${pt[pt.length - 1].split('-')[1]}` : '';
+                        const faqs = [
+                            ['はじめての登録では何を入力しますか？', <>お名前・電話番号・店舗名（会社名）の3つです。登録は最初の1回だけです。<br/>あとから変えたいときは、下の「ご注文」の一番下にある「ご登録情報の変更」から直せます。</>],
+                            ['受け取り方法はどう選べばいいですか？', <><b>🏪 店頭で受け取る</b>：送料はかかりません。{pickupRange && <>{pickupRange}の間で、ご来店の時間帯を選べます。</>}<br/><b>🚚 配送してもらう</b>：毎週{days}曜日の{DELIVERY.time.replace('-', '〜')}頃にお届けします。配送エリアは{DELIVERY.areas.join('・')}です。送料は¥{DELIVERY.fee.toLocaleString()}、商品合計¥{DELIVERY.freeThreshold.toLocaleString()}以上で無料です。</>],
+                            ['注文の締め切りはいつですか？', <>お受け取り日・配送日の<b>前日23:59</b>までです。当日分をご希望のときは、お電話でご相談ください。</>],
+                            ['お支払い方法は？', <><b>現金のみ</b>です。店頭ではお受け取りのとき、配送では配達のときにお支払いください。</>],
+                            ['注文した内容を確かめたいです', <>画面の下の「<b>ご注文</b>」で、これからのご注文と今までのご注文を見られます。注文が終わると、公式LINEにも確認のお知らせが届きます。</>],
+                            ['キャンセルしたいです', <>お受け取り日・配送日の<b>前日23:59まで</b>なら、「ご注文」から該当の注文を開き「キャンセルする」を押してください。<br/>それを過ぎたときは、公式LINEのトークかお電話でご連絡ください。</>],
+                            ['数を変えたい・商品を追加したいです', <><b>追加</b>：もう一度ふつうに注文してください（別の注文として受け付けます）。<br/><b>減らす・変える</b>：前日23:59までなら、いったんキャンセルしてから注文し直してください。それを過ぎたときは、公式LINEのトークかお電話でご連絡ください。</>],
+                            ['「売り切れ」と出ています', <>収穫が追いついていない状態です。入荷するとまた注文できるようになります。カートには、そのときの在庫の数までしか入りません。</>],
+                            ['LINEにお知らせが届きません', <>公式LINEを<b>友だち追加</b>しているか、<b>ブロック</b>していないかをご確認ください。お知らせが届かなくても、注文は「ご注文」で確認できます。</>],
+                            ['画面が開かない・途中で止まりました', <>いったん閉じて、<b>LINEのトーク画面から</b>もう一度開いてください（本人確認のため、LINEの中から開く必要があります）。電波の良い場所でもお試しください。それでも直らないときは、お電話でご連絡ください。</>],
+                            ['届いた商品に不備がありました', LEGAL.returns],
+                        ];
+                        return (
+                            <div className="fixed inset-0 z-[70] bg-cream overflow-y-auto">
+                                <div className="max-w-[430px] mx-auto px-5 pt-4 pb-10 text-sm text-stone-700">
+                                    <div className="flex items-center justify-between mb-3"><h2 className="font-black text-lg text-stone-800">使い方・よくある質問</h2><button type="button" onClick={() => setShowHelp(false)} className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow" aria-label="閉じる"><Icons.X className="w-5 h-5" /></button></div>
+                                    <h3 className="font-black text-nanairo-dark mb-2">ご注文の流れ</h3>
+                                    <ol className="space-y-2">
+                                        {[['商品を選ぶ', '「カートに入れる」を押し、＋−で数を決めます。'], ['カートを見る', '画面の下に出る緑のボタンを押します。'], ['受け取り方法と日時を選ぶ', '店頭か配送かを選び、日にちと時間帯を決めます。'], ['「予約する」を押す', 'これで完了です。公式LINEに確認のお知らせが届きます。']].map(([t, d], i) => (
+                                            <li key={t} className="flex gap-3 items-start bg-white rounded-2xl p-3 border border-stone-200">
+                                                <span className="w-7 h-7 rounded-full bg-nanairo-dark text-white font-black flex items-center justify-center shrink-0 text-sm">{i + 1}</span>
+                                                <div><b className="text-stone-800">{t}</b><div className="text-xs text-stone-500 mt-0.5">{d}</div></div>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                    <h3 className="font-black text-nanairo-dark mt-6 mb-2">よくある質問</h3>
+                                    <div className="bg-white rounded-2xl border border-stone-200 divide-y divide-stone-100">
+                                        {faqs.map(([q, a]) => (
+                                            <details key={q} className="group px-4 py-3">
+                                                <summary className="flex items-center justify-between gap-2 cursor-pointer list-none font-bold text-stone-800"><span><span className="text-nanairo-dark mr-1">Q.</span>{q}</span><Icons.Plus className="w-4 h-4 text-stone-400 shrink-0 group-open:rotate-45 transition-transform" /></summary>
+                                                <div className="mt-2 text-[13px] leading-relaxed text-stone-600">{a}</div>
+                                            </details>
+                                        ))}
+                                    </div>
+                                    <h3 className="font-black text-nanairo-dark mt-6 mb-2">お問い合わせ</h3>
+                                    <div className="bg-white rounded-2xl border border-stone-200 p-4 space-y-3">
+                                        <a href={`tel:${LEGAL.tel.replace(/-/g, '')}`} className="block w-full rounded-full py-3 bg-nanairo-dark text-white text-center font-bold">📞 電話する（{LEGAL.tel}）</a>
+                                        {LEGAL.hours && <p className="text-xs text-stone-500 text-center -mt-1">受付時間：{LEGAL.hours}</p>}
+                                        <button type="button" onClick={closeApp} className="w-full rounded-full py-3 bg-stone-100 text-stone-700 font-bold">💬 公式LINEのトークで連絡する</button>
+                                    </div>
+                                    {LEGAL.ready && <button type="button" onClick={() => { setShowHelp(false); setShowLegal(true); }} className="block mx-auto mt-6 text-[11px] text-stone-400 underline">特定商取引法に基づく表記・個人情報の取り扱い</button>}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {showLegal && (
                         <div className="fixed inset-0 z-[70] bg-cream overflow-y-auto">
                             <div className="max-w-[430px] mx-auto px-5 pt-4 pb-10 text-sm text-stone-700">
@@ -1009,7 +1063,7 @@
                                         </div>
                                     ))}
                                 </div>
-                                <p className="text-xs text-stone-500 mt-3">注文の確認・キャンセルは、下の「ご注文」からできます。</p>
+                                <p className="text-xs text-stone-500 mt-3">注文の確認・キャンセルは、下の「ご注文」からできます。<br/>困ったときは、右上の「<b>？使い方</b>」をご覧ください。</p>
                                 <button type="button" onClick={closeGuide} className="mt-4 w-full rounded-full py-3 bg-nanairo-dark text-white font-bold">はじめる</button>
                             </div>
                         </div>
