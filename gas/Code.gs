@@ -177,6 +177,12 @@ function setupV5() {
   Logger.log("v5 の準備が完了しました（販売中・説明・商品ID内訳・スタッフメモ・お客様メモ・委託先の連絡先・設定）");
 }
 
+// お客様が入力した文字を台帳に書くとき、先頭が = + - @ だと計算式として扱われるので、文字として保存する
+function sheetText(v) {
+  const t = String(v == null ? "" : v);
+  return /^[=+\-@]/.test(t) ? "'" + t : t;
+}
+
 function newOrderId() {
   return "ord_" + Utilities.getUuid().replace(/-/g, "").substring(0, 16);
 }
@@ -933,10 +939,14 @@ function processNewOrder(data) {
     prodByName[String(prodValues[i][COL_PROD_NAME])] = { id: String(prodValues[i][COL_PROD_ID]), price: Number(prodValues[i][COL_PROD_PRICE] || 0), stock: Number(prodValues[i][COL_PROD_STOCK] || 0) };
   }
 
-  const items = String(data.orderItems || "").split("\n").map(s => {
+  const items = [];
+  String(data.orderItems || "").split("\n").forEach(s => {
     const p = s.split(" × ");
-    return p.length === 2 ? { name: p[0].trim(), qty: parseInt(p[1], 10) } : null;
-  }).filter(it => it && it.qty > 0);
+    const name = p.length === 2 ? p[0].trim() : "", qty = p.length === 2 ? parseInt(p[1], 10) : 0;
+    if (!name || !(qty > 0)) return;
+    const same = items.find(it => it.name === name); // 同じ商品が2行に分かれていたら合算してから在庫を確かめる
+    if (same) same.qty += qty; else items.push({ name: name, qty: qty });
+  });
   if (items.length === 0) throw new Error("商品が選択されていません。");
 
   let subtotal = 0;
@@ -965,11 +975,11 @@ function processNewOrder(data) {
 
   // --- 4. 書き込み ---
   SHEET_ORDERS.appendRow([
-    data.userName,
+    sheetText(data.userName),
     items.map(it => `${it.name} × ${it.qty}`).join("\n"),
     pickupDate,
     pickupTime,
-    memo,
+    sheetText(memo),
     totalPrice,
     new Date(),
     data.userId,
@@ -977,10 +987,10 @@ function processNewOrder(data) {
     "",
     "",
     method,
-    address,
+    sheetText(address),
     phone ? "'" + phone : "", // 先頭の0が消えないよう文字列で保存
     shippingFee,
-    storeName,
+    sheetText(storeName),
     orderId,
     "",
     items.map(it => `${it.id}:${it.qty}`).join(","),
@@ -1094,12 +1104,12 @@ function saveCustomer(data, verified) {
   const now = new Date();
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][0]) === String(data.userId)) {
-      sh.getRange(i + 1, 2, 1, 3).setValues([[fullName, phone, storeName]]);
+      sh.getRange(i + 1, 2, 1, 3).setValues([[sheetText(fullName), phone, sheetText(storeName)]]);
       sh.getRange(i + 1, 6).setValue(now);
       return { fullName: fullName, phone: phone, storeName: storeName };
     }
   }
-  sh.appendRow([data.userId, fullName, phone, storeName, now, now]);
+  sh.appendRow([data.userId, sheetText(fullName), phone, sheetText(storeName), now, now]);
   return { fullName: fullName, phone: phone, storeName: storeName };
 }
 
