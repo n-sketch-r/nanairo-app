@@ -535,7 +535,7 @@
                                     <div className="text-sm text-gray-700 font-bold mb-2">請求明細書</div>
                                     <div className="flex justify-between items-start mb-6">
                                         <div><h1 className="text-xl font-bold border-b border-gray-400 inline-block pb-1 min-w-[280px] mt-4">{printName} <span className="text-base font-normal ml-2">{printHonorific}</span></h1></div>
-                                        <div className="text-right text-xs text-gray-700 leading-relaxed">株式会社N-SKETCH<br/>〒997-0018 山形県鶴岡市茅原町26-23<br/>TEL 0235-26-0759 / FAX 0235-26-0758<br/><span className="font-bold">登録番号: T390001016462</span></div>
+                                        <div className="text-right text-xs text-gray-700 leading-relaxed">株式会社N-SKETCH<br/>〒997-0018 山形県鶴岡市茅原町26-23<br/>TEL 0235-26-0759 / FAX 0235-26-0758<br/><span className="font-bold">登録番号: T7390001016462</span></div>
                                     </div>
                                     <div className="grid grid-cols-3 gap-4 mb-6 max-w-md">
                                         <div className="col-span-2 border border-gray-400 p-2 rounded flex flex-col justify-between"><span className="text-[10px] text-gray-500 font-bold">合計金額(税込)</span><span className="text-2xl font-bold text-right">¥{Number(currentTotalSpend || 0).toLocaleString()} <span className="text-sm font-normal">円</span></span></div>
@@ -574,7 +574,7 @@
                                                 <div><h1 className="text-2xl font-bold border-b border-gray-400 inline-block pb-1 min-w-[200px]">{order.userName} <span className="text-lg">御中</span></h1></div>
                                                 <div className="text-right">
                                                     <h2 className="text-3xl font-bold tracking-widest text-gray-800 mb-2">{order.docTitle || '納 品 書'}</h2>
-                                                    <div className="text-xs text-gray-500 mb-2">発行日: {order.pickupDate}<br/><span className="font-bold">登録番号: T390001016462</span></div>
+                                                    <div className="text-xs text-gray-500 mb-2">発行日: {order.pickupDate}<br/><span className="font-bold">登録番号: T7390001016462</span></div>
                                                     <div className="font-bold text-base">（株）N-SKETCH　のぞみの家</div>
                                                     <div className="text-xs text-gray-600 mt-1">〒997-0018 山形県鶴岡市茅原町26-23<br/>TEL 0235-26-0759 / FAX 0235-26-0758</div>
                                                 </div>
@@ -621,7 +621,7 @@
                                 const targetName = printOrders.length === 1 ? printName : (order.storeName || order.userName || '');
                                 return (
                                     <div key={order.id} className="page-break bg-white p-8 sm:p-12 shadow-sm rounded-lg border border-gray-200 mb-8 w-[800px] min-w-[800px] max-w-[800px] mx-auto text-gray-800 relative min-h-[250mm] pt-12 print:w-full print:min-w-0 print:max-w-none">
-                                        <div className="text-right text-sm text-gray-500 mb-6">発行日: {todayText}<br/><span className="font-bold">登録番号: T390001016462</span></div>
+                                        <div className="text-right text-sm text-gray-500 mb-6">発行日: {todayText}<br/><span className="font-bold">登録番号: T7390001016462</span></div>
                                         <div className="flex justify-between items-start mb-10 border-b-2 border-gray-800 pb-4">
                                             <div><h1 className="text-2xl font-bold border-b border-gray-400 inline-block pb-1 min-w-[200px]">{targetName} <span className="text-lg">様</span></h1></div>
                                             <div className="text-right">
