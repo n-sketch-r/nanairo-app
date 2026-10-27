@@ -231,6 +231,7 @@
             const closeGuide = () => { setShowGuide(false); try { localStorage.setItem('nanairo_guide_seen', '1'); } catch (e) {} };
 
             const [isSubmitting, setIsSubmitting] = useState(false);
+            const orderReqRef = React.useRef({ key: "", id: "" }); // 同じ注文の送り直しに同じ受付番号を付ける
 
             // ★お客様の登録情報（初回だけ入力）。undefined=確認中 / null=未登録
             const [customer, setCustomer] = useState(undefined);
@@ -429,6 +430,23 @@
                 });
             };
 
+            // 商品一覧が変わったら、カートから販売停止の商品を外し、在庫を超えた数を減らす
+            useEffect(() => {
+                if (!productsData.length) return;
+                setCart(prev => {
+                    const next = {}; const changed = [];
+                    Object.entries(prev).forEach(([id, qty]) => {
+                        const p = productsData.find(x => x.id === id);
+                        if (!p || p.stock <= 0) { changed.push(`${p ? p.name : '販売を終了した商品'}をカートから外しました`); return; }
+                        if (qty > p.stock) { next[id] = p.stock; changed.push(`${p.name}は残り${p.stock}Pのため、数を${p.stock}にしました`); return; }
+                        next[id] = qty;
+                    });
+                    if (!changed.length) return prev;
+                    setErrorMsg(m => [m, ...changed].filter(Boolean).join('\n')); // サーバーからのお知らせがあれば残す
+                    return next;
+                });
+            }, [productsData]);
+
             const setQuantity = (productId, amount) => { setCart(prev => ({ ...prev, [productId]: amount })); setBumpKey(k => k + 1); };
 
             const cartSummary = useMemo(() => {
@@ -476,11 +494,16 @@
 
                 const orderItemsString = Object.entries(cart).map(([id, qty]) => {
                     const p = productsData.find(p => p.id === id);
-                    return `${p.name} × ${qty}`;
-                }).join('\n');
+                    return p && qty > 0 ? `${p.name} × ${qty}` : null;
+                }).filter(Boolean).join('\n');
+                if (!orderItemsString) { setErrorMsg("カートに商品がありません。"); setIsSubmitting(false); return; }
+                // 内容が同じなら同じ受付番号で送る（通信が切れて送り直しても、注文が2件にならない）
+                const reqKey = JSON.stringify([orderItemsString, deliveryMethod, isDelivery ? deliveryDate : pickupDate, isDelivery ? '' : pickupTime, isDelivery ? city + addressDetail : '', storeName, memo]);
+                if (orderReqRef.current.key !== reqKey) orderReqRef.current = { key: reqKey, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 10) };
 
                 const payload = {
                     action: "order", 
+                    requestId: orderReqRef.current.id,
                     userName: userName,
                     userId: userId,
                     idToken: getIdToken(),
@@ -523,6 +546,7 @@
                         address: isDelivery ? city + addressDetail.trim() : "",
                         total: result.totalPrice ?? cartSummary.grandTotal
                     });
+                    orderReqRef.current = { key: "", id: "" };
                     fetchUserOrders();
                     loadProducts();
 
@@ -821,6 +845,7 @@
                                     <div className="space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-100 mb-3">
                                         {Object.entries(cart).map(([id, qty]) => {
                                             const p = productsData.find(p => p.id === id);
+                                            if (!p) return null; // 販売停止になった商品（すぐにカートから外れる）
                                             return (
                                                 <div key={id} className="flex justify-between items-center gap-2 border-b border-gray-200 last:border-0 pb-2 last:pb-0">
                                                     <div className="min-w-0">
@@ -949,7 +974,7 @@
                                 <div className="p-3 border-t sticky bottom-0 bg-white shrink-0" style={{ paddingBottom: 'calc(20px + env(safe-area-inset-bottom))' }}>
                                     {errorMsg && (
                                         <div role="alert" className="mb-2 bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-lg p-2.5 flex gap-1.5 items-start whitespace-pre-line">
-                                            <Icons.AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{errorMsg}</span>
+                                            <Icons.AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span className="whitespace-pre-line">{errorMsg}</span>
                                         </div>
                                     )}
                                     <button 

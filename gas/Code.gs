@@ -403,7 +403,18 @@ function doPost(e) {
   let response = { status: "success" };
 
   try {
-    if (action === "order") response = Object.assign(response, processNewOrder(data));
+    if (action === "order") {
+      // 通信が切れて同じ注文がもう一度送られてきたときは、新しく作らずに前の結果を返す（10分間）
+      const reqKey = data.requestId ? "order_req_" + String(data.userId || "") + "_" + String(data.requestId).slice(0, 64) : "";
+      const cache = CacheService.getScriptCache();
+      const done = reqKey ? cache.get(reqKey) : null;
+      if (done) response = Object.assign(response, JSON.parse(done));
+      else {
+        const result = processNewOrder(data);
+        if (reqKey) cache.put(reqKey, JSON.stringify(result), 600);
+        response = Object.assign(response, result);
+      }
+    }
     else if (action === "saveProfile") response.profile = saveCustomer(data, verified);
     else if (action === "stockUpdate") response.logRow = processStockAdjustment(data);
     else if (action === "bulkLoss") response.logRows = processBulkLoss(data);
