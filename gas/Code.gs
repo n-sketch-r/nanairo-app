@@ -814,6 +814,12 @@ function processAgencyDelivery(data) {
   const deliveryDate = data.deliveryDate;
   const idPrefix = "AD" + new Date().getTime();
   if (!Array.isArray(items) || items.length === 0) throw new Error("納品する商品を選択してください。");
+  // 在庫より多く納品すると在庫がマイナスになるので、書き込む前に確かめる
+  clearProductsCache();
+  const stockNow = {}; fetchProducts().forEach(p => { stockNow[String(p.id)] = Number(p.stock || 0); });
+  const need = {}; items.forEach(it => { need[String(it.productId)] = (need[String(it.productId)] || 0) + positiveInt(it.qty, "納品数"); });
+  const short = Object.keys(need).filter(id => need[id] > (stockNow[id] || 0)).map(id => `${(items.find(it => String(it.productId) === id) || {}).productName || id}（在庫${Math.max(0, stockNow[id] || 0)}P）`);
+  if (short.length) throw new Error("在庫が足りません：" + short.join("、"));
 
   items.forEach((item, index) => {
     const qty = positiveInt(item.qty, "納品数");
@@ -1260,6 +1266,12 @@ function processCancelStockLog(data) {
   const currentStatus = String(row[5] || "");
 
   if (currentStatus === "取消") throw new Error("この記録はすでに取り消されています。");
+  if (String(row[2]).includes("収穫")) {
+    // 収穫を取り消すと在庫が減る。すでに注文・販売された分があると在庫がマイナスになるので止める
+    clearProductsCache();
+    const cur = fetchProducts().find(p => String(p.id) === String(row[1]));
+    if (cur && Number(row[3]) > Number(cur.stock || 0)) throw new Error(`この収穫を取り消すと在庫がマイナスになります（今の在庫 ${Math.max(0, Number(cur.stock || 0))}P）。すでに注文や販売に使われた分があります。数を直したいときは「ロス」で減らしてください。`);
+  }
 
   SHEET_STOCK_LOGS.getRange(rowIndex, 6).setValue("取消");
 
