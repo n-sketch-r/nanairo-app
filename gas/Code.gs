@@ -1223,6 +1223,12 @@ function processStockAdjustment(data) {
   else if (data.type === 'sale') { diff = -amount; typeLabel = "店頭販売"; }
   else throw new Error("区分が正しくありません。");
 
+  if (diff < 0) {
+    // 在庫より多く減らすと在庫がマイナスになり、お客様の画面の数がおかしくなるので止める
+    clearProductsCache(); // 最新の在庫で確かめる
+    const cur = fetchProducts().find(p => String(p.id) === String(data.productId));
+    if (cur && amount > Number(cur.stock || 0)) throw new Error(`在庫が足りません（残り${Math.max(0, Number(cur.stock || 0))}P）。実際の数と合っていなければ、先に「収穫」で在庫を直してください。`);
+  }
   if (!updateStockById(data.productId, diff)) throw new Error("商品が見つかりません。");
   SHEET_STOCK_LOGS.appendRow([ new Date(), data.productId, typeLabel, amount, data.memo || "", "" ]);
   clearProductsCache();

@@ -479,7 +479,7 @@
                     itemsList.forEach(item => {
                         const product = productsData.find(p => item.id && p.id === item.id) || productsData.find(p => p.name === item.name); // 商品IDで探す（名前が変わっても再注文できる）
                         // もし過去履歴になないろ菜があった場合、現在販売してないのでカートには入らない仕様になります
-                        if (product) newCart[product.id] = item.qty;
+                        if (product && product.stock > 0) newCart[product.id] = Math.min(item.qty, product.stock); // 在庫を超えないようにする
                     });
                 }
                 setCart(newCart); 
