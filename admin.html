@@ -926,6 +926,17 @@
                         {c && <button type="button" onClick={() => { setSelectedOrderId(null); setActiveTab('customers'); setSelectedCustomerKey(c.key); }} className="w-full text-right text-xs font-bold text-nanairo-dark">このお客様の台帳を開く ›</button>}
                         {next && <button type="button" onClick={() => setOrderStatus(order, next[0])} className="w-full rounded-xl py-3.5 bg-nanairo-dark text-white font-bold active:opacity-90">{next[1]}</button>}
                         {!isCancelled && cur > 0 && <button type="button" onClick={() => setOrderStatus(order, steps[cur - 1][0])} className="w-full text-center text-xs text-gray-400 underline">ひとつ前の状態に戻す</button>}
+                        {systemInfo && systemInfo.printer && systemInfo.printer.keySet && !isCancelled && (
+                            <button type="button" onClick={async () => {
+                                // まだ集金済でなければ確認する（先に出しておく使い方もできるように、止めはしない）
+                                if (!order.paidChecked && !window.confirm('まだ「集金済」になっていません。\n領収書を印刷しますか？')) return;
+                                try {
+                                    const r = await postAdmin({ action: 'printReceipt', orderId: order.id });
+                                    const n = r && r.receipt ? r.receipt.count : 1;
+                                    showMessage(n > 1 ? `領収書（再発行・${n}枚目）をカフェのプリンターに送りました` : '領収書をカフェのプリンターに送りました（1分ほどで出てきます）');
+                                } catch (e) { showMessage('送れませんでした: ' + e.message, 7000); }
+                            }} className="w-full rounded-xl py-3 border border-nanairo-dark text-nanairo-dark font-bold active:opacity-80">🧾 領収書を印刷</button>
+                        )}
                         {systemInfo && systemInfo.printer && systemInfo.printer.keySet && (
                             <button type="button" onClick={async () => { try { await postAdmin({ action: 'printOrder', orderId: order.id }); showMessage('カフェのプリンターに送りました（1分ほどで出てきます）'); } catch (e) { showMessage('送れませんでした: ' + e.message, 7000); } }} className="w-full text-center text-xs text-gray-500 underline">🖨 カフェのプリンターで注文票を印刷</button>
                         )}
@@ -1461,6 +1472,7 @@
                     'キャンセルの注文票が出たら、同じ「No.」の注文票を捨ててください（在庫は自動で戻ります）。',
                     '下の「□準備 □お渡し □集金」は、ペンでチェックするための欄です。',
                     'もう一度印刷したいときは、注文をタップして「カフェのプリンターで注文票を印刷」。',
+                    '領収書がほしいと言われたら、注文をタップして「🧾 領収書を印刷」。1分ほどでキッチンのプリンターから出ます（集金済でないときは確認が出ます。2回目からは「再発行」と入ります）。',
                     '動いているかは「その他 → システムの状態」で確認できます。「テスト印刷」を押すと、1分ほどで短いテストの紙が出ます。',
                     '「止まっているかも」と出たら：カフェのSurfaceの電源・Wi-Fi・充電ケーブルを確認してください。Surfaceは電源につないで、開いたままにしておきます。',
                     '止まっていた間の注文は消えません。Surfaceが元に戻ると、たまっていた分がまとめて出ます。',

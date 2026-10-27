@@ -350,7 +350,7 @@ function doPost(e) {
   const action = data.action || "order";
   const ADMIN_ACTIONS = ["getAdminData", "stockUpdate", "bulkLoss", "cancelStockLog", "statusUpdate", "toggleCheck",
     "agencyDelivery", "agencyInventory", "cancelAgencyDelivery", "cancelAgencyInventory", "checkAdmin",
-    "saveProduct", "saveAgency", "saveMemo", "saveSettings", "uploadProductImage", "backupNow", "printTest", "printOrder", "printPair"];
+    "saveProduct", "saveAgency", "saveMemo", "saveSettings", "uploadProductImage", "backupNow", "printTest", "printOrder", "printPair", "printReceipt"];
   const CUSTOMER_ACTIONS = ["order", "cancelOrder", "getUserOrders", "getProfile", "saveProfile"];
   const PRINT_ACTIONS = ["printJobs", "printDone"]; // カフェのSurfaceの印刷プログラムが使う
 
@@ -435,6 +435,7 @@ function doPost(e) {
     else if (action === "printDone") markPrintDone(data);
     else if (action === "printTest") enqueuePrint("test", [["big", "【テスト印刷】"], ["normal", "管理画面から送ったテストです"], ["normal", Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm")]], "");
     else if (action === "printOrder") enqueueOrderPrint("reprint", data.orderId);
+    else if (action === "printReceipt") response.receipt = enqueueReceiptPrint(data.orderId);
     else if (action === "printPair") response.printKey = newPrintKey();
     else throw new Error("不明なアクションが指定されました: " + action);
   } catch (err) {
@@ -1495,6 +1496,73 @@ function buildOrderPrintLines(kind, o) {
   L.push(["normal", printRow(no, `${od ? `${Number(od[1])}/${Number(od[2])} ${od[3]}` : o.orderDate} 受付`, W)]);
   L.push(["center", "マイクロハーブ"]);
   return L;
+}
+
+// ===== 領収書（キッチンのプリンターで出す） =====
+const RECEIPT_ISSUER = ["株式会社N-SKETCH", "登録番号 T7390001016462", "〒997-0018 山形県鶴岡市茅原町26-23", "TEL 0235-26-0759"];
+function yen(n) { return "￥" + Number(n || 0).toLocaleString(); }
+// 縦横2倍の文字を中央に置く（1行の半分の桁数で計算）
+function printCenterBig(t, cols) { return " ".repeat(Math.max(0, Math.floor((cols - printWidth(t)) / 2))) + t; }
+
+function buildReceiptLines(o, reissue) {
+  const W = PRINT_COLS, BW = Math.floor(PRINT_COLS / 2);
+  const now = new Date();
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][Number(Utilities.formatDate(now, "Asia/Tokyo", "u")) % 7];
+  const issued = Utilities.formatDate(now, "Asia/Tokyo", "yyyy年M月d日") + `(${wd})`;
+  const no = "No." + String(o.id).slice(-4).toUpperCase();
+  const ship = Number(o.shippingFee || 0), total = Number(o.totalPrice || 0), food = total - ship;
+  const foodTax = Math.floor(food * 8 / 108), shipTax = Math.floor(ship * 10 / 110);
+
+  // 明細の単価は今の価格表から。注文時の金額と合わないときは、数量だけ出す
+  const prices = {};
+  try { SHEET_PRODUCTS.getDataRange().getValues().slice(1).forEach(r => { prices[String(r[COL_PROD_ID])] = Number(r[COL_PROD_PRICE] || 0); }); } catch (e) {}
+  const items = o.itemsList || [];
+  const sum = items.reduce((a, it) => a + (prices[it.id] || 0) * it.qty, 0);
+  const showAmount = items.length > 0 && sum === food;
+
+  const L = [["center", "マイクロハーブ ／ 株式会社N-SKETCH"]];
+  L.push(["rev", reissue ? "領収書（再発行）" : "領 収 書"]);
+  L.push(["big", `${o.storeName || o.userName} 様`]);
+  L.push(["normal", printRow("発行日 " + issued, no, W)]);
+  L.push(["hr", "-".repeat(W)]);
+  L.push(["center", "金額（税込）"]);
+  L.push(["big", printCenterBig(yen(total) + "－", BW)]);
+  L.push(["center", ship > 0 ? `うち消費税 ${yen(foodTax + shipTax)}` : `うち消費税 ${yen(foodTax)}（軽減税率8%）`]);
+  L.push(["normal", "但し マイクロハーブ代として"]);
+  L.push(["normal", "上記正に領収いたしました"]);
+  L.push(["hr", "-".repeat(W)]);
+  L.push(["bold", printRow("品名", showAmount ? "数量      金額" : "数量", W)]);
+  items.forEach(it => {
+    const right = showAmount ? `×${it.qty}`.padEnd(5) + yen(prices[it.id] * it.qty).padStart(9) : `×${it.qty}`;
+    L.push(["normal", printRow(`${it.name} ※`, right, W)]);
+  });
+  if (ship > 0) L.push(["normal", printRow("送料", showAmount ? yen(ship) : yen(ship), W)]);
+  L.push(["normal", ""]);
+  L.push(["normal", printRow("8%対象計", yen(food), W)]);
+  L.push(["normal", printRow("　うち消費税", yen(foodTax), W)]);
+  if (ship > 0) {
+    L.push(["normal", printRow("10%対象計（送料）", yen(ship), W)]);
+    L.push(["normal", printRow("　うち消費税", yen(shipTax), W)]);
+  }
+  L.push(["normal", printRow("お支払い（現金）", yen(total), W)]);
+  L.push(["normal", "※は軽減税率（8%）対象品目"]);
+  L.push(["hr", "-".repeat(W)]);
+  L.push(["bold", RECEIPT_ISSUER[0]]);
+  RECEIPT_ISSUER.slice(1).forEach(t => L.push(["normal", t]));
+  L.push(["center", "いつもありがとうございます"]);
+  return L;
+}
+
+// 同じ注文の2回目からは「再発行」にする（回数はスクリプトプロパティに記録）
+function enqueueReceiptPrint(orderId) {
+  const o = fetchOrders().find(x => x.id === String(orderId));
+  if (!o) throw new Error("注文が見つかりません。");
+  if (o.status === "キャンセル") throw new Error("キャンセルされた注文の領収書は出せません。");
+  const key = "RCPT_" + o.id;
+  const count = Number(PROPS.getProperty(key) || 0);
+  enqueuePrint("receipt", buildReceiptLines(o, count > 0), o.id);
+  PROPS.setProperty(key, String(count + 1));
+  return { count: count + 1 };
 }
 
 function enqueueOrderPrint(kind, orderId) {
