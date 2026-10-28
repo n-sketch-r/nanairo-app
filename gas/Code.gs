@@ -1727,6 +1727,7 @@ function setupMorningTrigger() {
  *  金額はすべて税込。LINE注文の売上は商品代のみ（配送料は別集計）
  * ===================================================================== */
 function buildInsights(allOrders, startMonth, endMonth) {
+  const profileByKey = {}; try { fetchCustomerRecords().forEach(r => { profileByKey[r.key] = r; }); } catch (e) {}
   const tz = "Asia/Tokyo";
   const today = todayJst();
   if (!startMonth) startMonth = today.substring(0, 7);
@@ -1878,7 +1879,8 @@ function buildInsights(allOrders, startMonth, endMonth) {
       gap = Math.round((last - first) / 86400000 / (c.dates.length - 1));
     }
     const daysSince = Math.round((new Date(today) - new Date(c.last)) / 86400000);
-    return { id: k, name: c.name, userName: c.userName, first: c.first, last: c.last, orders: c.orders, spend: c.spend, avgGapDays: gap, daysSince: daysSince };
+    const rec = profileByKey[k]; // 登録情報（最新）の名前を優先する
+    return { id: k, name: (rec && (rec.storeName || rec.fullName)) || c.name, userName: (rec && rec.fullName) || c.userName, first: c.first, last: c.last, orders: c.orders, spend: c.spend, avgGapDays: gap, daysSince: daysSince };
   });
   const activeIds = {}; const newIds = {};
   allOrders.forEach(o => {

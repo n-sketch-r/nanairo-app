@@ -702,7 +702,7 @@
                     const followUp = since != null && since >= (gap ? Math.max(21, gap * 2) : 30);
                     const favorites = Object.entries(c.items).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
                     const rec = customerRecords.find(r => r.key === c.key) || {};
-                    const merged = { ...c, userName: rec.fullName || c.userName, storeName: c.storeName || rec.storeName || '', phone: c.phone || rec.phone || '', memo: rec.memo || '' };
+                    const merged = { ...c, userName: rec.fullName || c.userName, storeName: rec.storeName || c.storeName || '', phone: rec.phone || c.phone || '', memo: rec.memo || '' }; // 登録情報（最新）を優先。注文の店舗名は注文したときのもの
                     return { ...merged, name: merged.storeName || merged.userName || '（名前なし）', avgGap: gap, daysSince: since, followUp, favorites };
                 }).sort((a, b) => String(b.last).localeCompare(String(a.last)));
             })();
